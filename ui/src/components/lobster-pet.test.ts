@@ -915,7 +915,7 @@ describe("rare lobster loads", () => {
     ["clawiestardust", "Clawie Stardust"],
     ["taylorpinch", "Taylor Pinch"],
     ["clawtoodeetoo", "Clawtoo Deetoo"],
-    ["leonardodepinchy", "Leonardo de Pinchy"],
+    ["leonardodepinchy", "Leonardo DaPinchy"],
     ["shellvis", "Shellvis"],
     ["alexandergrahamshell", "Alexander Graham Shell"],
   ] as const)("records a genuine %s arrival with its signature identity", async (id, name) => {
