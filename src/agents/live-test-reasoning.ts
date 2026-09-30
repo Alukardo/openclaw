@@ -1,5 +1,6 @@
 import type { Model } from "openclaw/plugin-sdk/llm";
 import { resolveThinkingProfile } from "../auto-reply/thinking.js";
+import { projectModelThinkingCompat } from "./model-catalog-lookup.js";
 
 export function resolveLiveTestReasoning(
   model: Model,
@@ -30,6 +31,7 @@ export function resolveLiveTestReasoning(
         id: model.id,
         api: model.api,
         reasoning: model.reasoning,
+        compat: projectModelThinkingCompat(model.compat),
       },
     ],
     agentRuntime: "openclaw",

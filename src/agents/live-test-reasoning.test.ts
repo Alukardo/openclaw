@@ -15,4 +15,18 @@ describe("resolveLiveTestReasoning", () => {
       resolveLiveTestReasoning({ ...model, api: "openai-completions" } as Model),
     ).toBeUndefined();
   });
+
+  it("honors prepared OpenCode Go effort metadata", () => {
+    const model = {
+      provider: "opencode-go",
+      id: "deepseek-v4-flash",
+      api: "openai-completions",
+      reasoning: true,
+      compat: {
+        supportedReasoningEfforts: ["low", "high", "max"],
+      },
+    } as Model;
+
+    expect(resolveLiveTestReasoning(model)).toBe("low");
+  });
 });
