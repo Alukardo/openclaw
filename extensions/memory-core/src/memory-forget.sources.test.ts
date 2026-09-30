@@ -3,7 +3,11 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import * as storage from "openclaw/plugin-sdk/memory-core-host-engine-storage";
-import { openOpenClawAgentDatabase } from "openclaw/plugin-sdk/sqlite-runtime";
+import {
+  openOpenClawAgentDatabase,
+  openNodeSqliteDatabase,
+  resolveOpenClawAgentSqlitePath,
+} from "openclaw/plugin-sdk/sqlite-runtime";
 import {
   closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
@@ -33,6 +37,56 @@ describe("memory forget source removal", () => {
     await fixture.cleanup();
   });
 
+  it.each([
+    [
+      "missing required table",
+      /Session metadata unavailable \(table-missing: memory_index_chunks\)/,
+    ],
+    ["newer schema", /uses newer schema version 999/],
+    ["unreadable source", /file is not a database/],
+  ] as const)(
+    "refuses %s during read planning without repairing its source",
+    async (failure, message) => {
+      openOpenClawAgentDatabase({ agentId: "main" });
+      const databasePath = resolveOpenClawAgentSqlitePath({ agentId: "main" });
+      await closeOpenClawAgentDatabasesAsync(fixture.stateDir);
+      closeOpenClawAgentDatabasesForTest(fixture.stateDir);
+      const original = await fs.readFile(databasePath);
+      try {
+        if (failure === "unreadable source") {
+          await fs.writeFile(databasePath, "not a SQLite database");
+        } else {
+          const setup = openNodeSqliteDatabase(databasePath);
+          try {
+            setup.exec(
+              failure === "newer schema"
+                ? "PRAGMA user_version = 999"
+                : "DROP TABLE memory_index_chunks",
+            );
+          } finally {
+            setup.close();
+          }
+        }
+        const beforeRead = await fs.readFile(databasePath);
+        const reading = async () =>
+          failure === "missing required table"
+            ? pruneMemoryEntryOrigins({
+                workspaceDir: fixture.workspaceDir,
+                agentIds: ["main"],
+                entryKeys: ["candidate"],
+                retainedEntryKeys: new Set(),
+              })
+            : listMemoryEntryOrigins({ agentId: "main" });
+        await expect(reading()).rejects.toThrow(message);
+        expect(await fs.readFile(databasePath)).toEqual(beforeRead);
+      } finally {
+        await closeOpenClawAgentDatabasesAsync(fixture.stateDir);
+        closeOpenClawAgentDatabasesForTest(fixture.stateDir);
+        await fs.writeFile(databasePath, original);
+      }
+    },
+  );
+
   it.each(["removed", "new mixed contributor"] as const)(
     "keeps selected file provenance when another workspace leaves lineage %s during planning",
     async (change) => {
@@ -47,7 +101,7 @@ describe("memory forget source removal", () => {
         observedAt: 1,
       };
       const survivor = { ...selected, entryKey: "survivor-entry", sessionId: "survivor" };
-      recordMemoryEntryOrigins({ agentId: "main", origins: [selected, survivor] });
+      await recordMemoryEntryOrigins({ agentId: "main", origins: [selected, survivor] });
       const memoryPath = path.join(fixture.workspaceDir, "MEMORY.md");
       const retained =
         "<!-- openclaw-memory-promotion:survivor-entry -->\n- Retained amber detail.\n";
@@ -90,10 +144,10 @@ describe("memory forget source removal", () => {
               retainedEntryKeys: new Set(),
             });
             expect(
-              listMemoryEntryOrigins({ agentId: "main", entryKeys: [selected.entryKey] }),
+              await listMemoryEntryOrigins({ agentId: "main", entryKeys: [selected.entryKey] }),
             ).toEqual([]);
           } else {
-            recordMemoryEntryOrigins({
+            await recordMemoryEntryOrigins({
               agentId: "main",
               origins: [{ ...selected, sessionId: "survivor" }],
             });
@@ -106,8 +160,8 @@ describe("memory forget source removal", () => {
           mixedLineageEntryKeys: report.mixedLineageEntryKeys,
           untargetableEntryKeys: report.untargetableEntryKeys,
           memory: await fs.readFile(memoryPath, "utf8"),
-          origins: listMemoryEntryOrigins({ agentId: "main" }),
-          tombstones: listMemorySessionTombstones({ agentId: "main" }).map(
+          origins: await listMemoryEntryOrigins({ agentId: "main" }),
+          tombstones: (await listMemorySessionTombstones({ agentId: "main" })).map(
             ({ sessionId }) => sessionId,
           ),
         };
@@ -137,7 +191,7 @@ describe("memory forget source removal", () => {
       originClass: "owner" as const,
       observedAt: 1,
     };
-    recordMemoryEntryOrigins({ agentId: "main", origins: [origin] });
+    await recordMemoryEntryOrigins({ agentId: "main", origins: [origin] });
     const memoryPath = path.join(fixture.workspaceDir, "MEMORY.md");
     const content =
       "<!-- openclaw-memory-promotion:selected-entry -->\n- Selected violet detail.\n";
@@ -151,8 +205,9 @@ describe("memory forget source removal", () => {
     );
     db.prepare(`INSERT INTO memory_index_chunks
       (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
-      VALUES ('selected-snapshot', 'MEMORY.md', 'memory', 1, 2, 'fixture', 'test', ?, '[1,0]', 1)`).run(
+      VALUES ('selected-snapshot', 'MEMORY.md', 'memory', 1, 2, 'fixture', 'test', ?, ?, 1)`).run(
       content,
+      storage.encodeMemoryEmbedding([1, 0]),
     );
     db.prepare("INSERT INTO memory_index_chunks_vec (id, embedding) VALUES (?, ?)").run(
       "selected-snapshot",
@@ -188,8 +243,8 @@ describe("memory forget source removal", () => {
     );
     const readDurable = async (database: DatabaseSync) => ({
       memory: await fs.readFile(memoryPath, "utf8"),
-      origins: listMemoryEntryOrigins({ agentId: "main" }),
-      tombstones: listMemorySessionTombstones({ agentId: "main" }),
+      origins: await listMemoryEntryOrigins({ agentId: "main" }),
+      tombstones: await listMemorySessionTombstones({ agentId: "main" }),
       chunks: database.prepare("SELECT id, text FROM memory_index_chunks ORDER BY id").all(),
       vectors: database.prepare("SELECT id FROM memory_index_chunks_vec ORDER BY id").all(),
       revision: database.prepare("SELECT revision FROM memory_index_state WHERE id = 1").get(),
@@ -239,7 +294,7 @@ describe("memory forget source removal", () => {
       );
       const insertChunk = db.prepare(`INSERT INTO memory_index_chunks
       (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
-      VALUES (?, ?, 'sessions', 1, 1, 'fixture-hash', 'test', 'forget', '[]', 1)`);
+      VALUES (?, ?, 'sessions', 1, 1, 'fixture-hash', 'test', 'forget', x'', 1)`);
       const provenance = db.prepare(`INSERT INTO memory_index_chunk_provenance
       (chunk_id, origin_class, session_kind, observed_at) VALUES (?, 'agent', 'interactive', 1)`);
       const sessionIds = Array.from({ length: sessionCount }, (_, index) =>
@@ -299,7 +354,7 @@ describe("memory forget source removal", () => {
           survivors,
         );
         expect(db.prepare("SELECT id FROM memory_index_chunks").all()).toEqual([]);
-        expect(listMemorySessionTombstones({ agentId: "main" })).toMatchObject(
+        expect(await listMemorySessionTombstones({ agentId: "main" })).toMatchObject(
           sessionIds.toSorted().map((sessionId) => ({ sessionId, reason: "forgotten" })),
         );
         expect(sourceDeletes).toBeGreaterThan(0);
@@ -322,7 +377,7 @@ describe("memory forget source removal", () => {
       VALUES ('sessions/main/target-0.jsonl', 'sessions', 'keep-until-admitted', 1, 1)`).run();
       db.prepare(`INSERT INTO memory_index_chunks
       (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
-      VALUES ('target-chunk', 'sessions/main/target-0.jsonl', 'sessions', 1, 1, 'hash', 'test', 'forget', '[]', 1)`).run();
+      VALUES ('target-chunk', 'sessions/main/target-0.jsonl', 'sessions', 1, 1, 'hash', 'test', 'forget', x'', 1)`).run();
       db.prepare(`INSERT INTO memory_index_chunk_provenance
       (chunk_id, origin_class, session_kind, observed_at)
       VALUES ('target-chunk', 'agent', 'interactive', 1)`).run();
@@ -334,7 +389,7 @@ describe("memory forget source removal", () => {
       await expect(forgetMemoryEntries({ cfg, agentId: "main", sessionIds })).rejects.toThrow(
         "synthetic admission failure",
       );
-      expect(listMemorySessionTombstones({ agentId: "main" })).toEqual([]);
+      expect(await listMemorySessionTombstones({ agentId: "main" })).toEqual([]);
       expect(db.prepare("SELECT * FROM memory_index_sources").all()).toEqual(sources);
       expect(db.prepare("SELECT * FROM memory_index_chunks").all()).toEqual(chunks);
       expect(db.prepare("SELECT revision FROM memory_index_state WHERE id = 1").get()).toEqual(
@@ -344,7 +399,7 @@ describe("memory forget source removal", () => {
       const result = await forgetMemoryEntries({ cfg, agentId: "main", sessionIds });
       expect(result.artifacts.indexSources).toBe(1);
       expect(result.artifacts.indexChunks).toBe(1);
-      expect(listMemorySessionTombstones({ agentId: "main" })).toHaveLength(130);
+      expect(await listMemorySessionTombstones({ agentId: "main" })).toHaveLength(130);
       expect(db.prepare("SELECT * FROM memory_index_sources").all()).toEqual([]);
       expect(db.prepare("SELECT * FROM memory_index_chunks").all()).toEqual([]);
     },

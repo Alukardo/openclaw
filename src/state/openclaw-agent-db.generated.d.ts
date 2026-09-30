@@ -139,7 +139,7 @@ export interface HeartbeatOutcomes {
 
 export interface MemoryEmbeddingCache {
   dims: number | null;
-  embedding: string;
+  embedding: Uint8Array;
   hash: string;
   model: string;
   provider: string;
@@ -172,7 +172,8 @@ export interface MemoryIndexChunkRecallMetadata {
 }
 
 export interface MemoryIndexChunks {
-  embedding: string;
+  chunk_rowid: Generated<number>;
+  embedding: Uint8Array;
   end_line: number;
   hash: string;
   id: string;
@@ -245,6 +246,12 @@ export interface SessionConversations {
   session_id: string;
 }
 
+export interface SessionEntrySnapshots {
+  field: string;
+  session_key: string;
+  value_json: string;
+}
+
 export interface SessionGoalOperations {
   expires_at: number;
   operation_id: string;
@@ -308,6 +315,7 @@ export interface SessionNodes {
   pinned_at: number | null;
   project_id: string | null;
   session_key: string;
+  snapshot_revision: Generated<number>;
   spawned_by: string | null;
   status: string | null;
   updated_at: number;
@@ -344,6 +352,16 @@ export interface SessionProgressCards {
   session_key: string;
   steps_json: string | null;
   updated_at: number;
+}
+
+export interface SessionReactions {
+  created_at: number;
+  emoji: string;
+  identity_id: string;
+  identity_label: string | null;
+  message_id: string;
+  session_id: string;
+  session_key: string;
 }
 
 export interface SessionSuggestions {
@@ -436,14 +454,14 @@ export interface SessionTranscriptFtsIdx {
 }
 
 export interface SessionTranscriptFtsRows {
-  fts_rowid: Generated<number>;
+  id: Generated<number>;
+  message_id: string | null;
   session_id: string;
 }
 
 export interface SessionTranscriptIndexState {
   active_event_count: Generated<number>;
   active_message_count: Generated<number>;
-  fts_row_count: number | null;
   indexed_seq: number;
   leaf_event_id: string | null;
   needs_rebuild: Generated<number>;
@@ -544,7 +562,10 @@ export interface TranscriptEventIdentities {
 
 export interface TranscriptEvents {
   created_at: number;
-  event_json: string;
+  event_json: string | null;
+  event_utf8_bytes: number | null;
+  event_zstd: Uint8Array | null;
+  navigation_json: string | null;
   seq: number;
   session_id: string;
 }
@@ -579,6 +600,7 @@ export interface DB {
   schema_meta: SchemaMeta;
   session_canonical_validation_pending: SessionCanonicalValidationPending;
   session_conversations: SessionConversations;
+  session_entry_snapshots: SessionEntrySnapshots;
   session_goal_operations: SessionGoalOperations;
   session_input_completions: SessionInputCompletions;
   session_key_contract: SessionKeyContract;
@@ -587,6 +609,7 @@ export interface DB {
   session_participants: SessionParticipants;
   session_pending_inputs: SessionPendingInputs;
   session_progress_cards: SessionProgressCards;
+  session_reactions: SessionReactions;
   session_suggestions: SessionSuggestions;
   session_transcript_active_events: SessionTranscriptActiveEvents;
   session_transcript_archives: SessionTranscriptArchives;

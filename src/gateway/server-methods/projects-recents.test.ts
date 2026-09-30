@@ -29,7 +29,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
     const targetProfile = ensureProfileForEmail("target@example.test");
     const foreignProfile = ensureProfileForEmail("foreign@example.test");
     const actor = { type: "human" as const, source: "profile" as const, id: sourceProfile.id };
-    const repository = getSessionRepositoryWorkspaceStore().create({
+    const repository = await getSessionRepositoryWorkspaceStore().create({
       agentId: "main",
       sessionKey: "agent:main:cloud",
       url: "https://github.com/octocat/hello-world.git",
@@ -157,6 +157,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
           ),
         ).toEqual(expected);
       }
+      expect(workerReads).not.toHaveBeenCalled();
       replaceSessionEntrySync(
         { agentId: "main", sessionKey: "agent:main:updated-recent" },
         {
@@ -181,7 +182,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
           ...expectedRecents.slice(0, 7),
         ],
       });
-      expect(workerReads.mock.calls.length).toBe(0);
+      expect(workerReads).toHaveBeenCalled();
     } finally {
       workerReads.mockRestore();
     }

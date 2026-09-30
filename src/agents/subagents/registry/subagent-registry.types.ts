@@ -1,17 +1,32 @@
+import type {
+  SessionEntryCurrentCheck,
+  SessionEntryCurrentFacts,
+} from "../../../config/sessions/session-entry-current.types.js";
+import type { SessionEntry } from "../../../config/sessions/types.js";
 import type { SubagentEndReason } from "../../../context-engine/types.js";
-import type { GatewayContextResolver } from "../../../gateway/server-methods/types.js";
-/** Persisted execution, completion, delivery, and attachment state for child runs. */
 import type { DeliveryContext } from "../../../utils/delivery-context.types.js";
 import type { AgentRunTerminalReplySnapshot } from "../../agent-run-terminal-reply.types.js";
-import type { AgentRunSessionTarget } from "../../run-session-target.js";
+import type { AgentRunSessionTarget } from "../../run-session-target.types.js";
 import type { SubagentLaunchAuthorization } from "../spawn/subagent-launch-authorization.js";
 import type { SpawnSubagentMode } from "../spawn/subagent-spawn.types.js";
 import type { SubagentRunOutcome } from "../subagent-run-outcome.types.js";
 import type { SubagentLifecycleEndedReason } from "./subagent-lifecycle-events.js";
 import type {
-  SubagentRunReadRecord,
   SubagentCompletionDeliveryState,
+  SubagentRunReadRecord,
 } from "./subagent-registry-read.types.js";
+
+export type SubagentSessionEffects = {
+  isCurrent(): Promise<boolean>;
+  assertHostCurrent(): void;
+  assertCurrentEntry(this: void, facts: SessionEntryCurrentFacts | undefined): void;
+  nativeCheck?: SessionEntryCurrentCheck;
+};
+
+export type SubagentRecoveryCurrent = {
+  prepare(): Promise<boolean>;
+  isHostCurrent(): boolean;
+};
 
 export type SubagentCompletionRequest = {
   runId: string;
@@ -26,10 +41,10 @@ export type SubagentCompletionRequest = {
   startedAt?: number;
   suppressSessionEffects?: boolean;
   recoverInterrupted?: true;
-  /** Revalidates orphan ownership after waiting for the terminal completion lock. */
-  isRecoveryCurrent?: () => boolean;
+  /** Prepare database currency asynchronously; publication rechecks live host authority. */
+  recoveryCurrent?: SubagentRecoveryCurrent;
   /** Child effects may be fenced while the recorded result still owes requester delivery. */
-  isChildSessionEffectsCurrent?: () => boolean;
+  sessionEffects?: SubagentSessionEffects;
   completionSnapshot?: { resultText: string | null; capturedAt: number };
   terminalReply?: AgentRunTerminalReplySnapshot;
 };
@@ -69,7 +84,6 @@ type SubagentExecutionState = SubagentRunReadRecord["execution"] & {
   suppressSessionEffects?: true;
   acceptedAt?: number;
   interruptedAt?: number;
-  interruptionReason?: "gateway-restart";
   transcriptTarget?: AgentRunSessionTarget;
 };
 
@@ -105,6 +119,8 @@ type SwarmQueuedLaunch = {
 
 /** Durable outbox state for the top-level requester settle wake. */
 export type RequesterSettleWakeState = {
+  /** Pending message-wait notice; consuming it leaves the completion cohort armed. */
+  pauseNotice?: { acknowledgment: string };
   status: "pending" | "dispatching";
   /** Number of delivery attempts already admitted. */
   attemptCount: number;
@@ -149,9 +165,10 @@ type SubagentKillIntent = {
   suppressTaskDelivery?: boolean;
 };
 
+/** Persisted execution, completion, delivery, and attachment state for child runs. */
 export type SubagentRunRecord = Omit<SubagentRunReadRecord, "execution" | "collectorCompletion"> & {
-  /** Detached task owner; steer/restart changes runId but continues the same task. */
-  taskRunId?: string;
+  /** Child identity stays fixed when recovery redirects transcript writes. */
+  childSessionIdentity?: Pick<SessionEntry, "sessionId" | "lifecycleRevision">;
   /** Exact requester attempt for cancellation, independent of completion messaging. */
   requesterTurnRunId?: string;
   /** Durable proof that this requester attempt invoked sessions_yield. */
@@ -183,6 +200,7 @@ export type SubagentRunRecord = Omit<SubagentRunReadRecord, "execution" | "colle
   expectsCompletionMessage?: boolean;
   completionTarget?: "parent";
   completionRequesterSessionId?: string;
+  completionRequesterLifecycleRevision?: string;
   wakeOnDescendantSettle?: boolean;
   execution: SubagentExecutionState;
   completion?: SubagentCompletionState;
@@ -240,6 +258,7 @@ export type SubagentRunMaintenanceRecord = Pick<
 
 export type SubagentRegistrationScope = {
   readonly waitForClaim: () => Promise<void> | undefined;
+  readonly waitForRetirementPublication: () => Promise<void> | undefined;
   readonly canLaunch: () => boolean;
   readonly canCleanupSession: () => boolean;
   readonly canAcceptLaunch: () => boolean;
@@ -248,48 +267,8 @@ export type SubagentRegistrationScope = {
 };
 
 export type RegisterSubagentRunOptions = {
+  persistence?: "worker";
   assertCurrent?: () => void;
+  assertPublicationCurrent?: () => void;
   retainOwnership?: (scope: SubagentRegistrationScope) => void;
-};
-
-export type RegisterSubagentRunParams = {
-  runId: string;
-  requesterTurnRunId?: string;
-  childSessionKey: string;
-  controllerSessionKey?: string;
-  requesterSessionKey: string;
-  requesterOrigin?: DeliveryContext;
-  progressOrigin?: SubagentProgressOrigin;
-  requesterDisplayKey: string;
-  task: string;
-  taskName?: string;
-  agentId?: string;
-  requesterAgentId?: string;
-  cleanup: "delete" | "keep";
-  label?: string;
-  model?: string;
-  agentDir?: string;
-  workspaceDir?: string;
-  runTimeoutSeconds?: number;
-  expectsCompletionMessage?: boolean;
-  completionTarget?: "parent";
-  completionRequesterSessionId?: string;
-  spawnMode?: "run" | "session";
-  attachmentId?: string;
-  attachmentsDir?: string;
-  attachmentsRootDir?: string;
-  retainAttachmentsOnKeep?: boolean;
-  collect?: boolean;
-  swarmRequesterSessionKey?: string;
-  swarmLaunchIdempotencyKey?: string;
-  swarmLaunchReplayKey?: string;
-  swarmLaunchRequestFingerprint?: string;
-  groupId?: string;
-  outputSchema?: Record<string, unknown>;
-  queuedLaunch?: SwarmQueuedLaunch;
-  queued?: boolean;
-  /** Required when direct dispatch suppresses Gateway tracking. Out-of-process launches keep
-      Gateway's existing best-effort CLI policy; other callers create a best-effort row here. */
-  taskRowOwnership?: "required" | "gateway_best_effort";
-  gatewayContextResolver?: GatewayContextResolver;
 };

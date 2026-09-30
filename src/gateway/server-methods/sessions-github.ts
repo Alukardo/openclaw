@@ -12,6 +12,7 @@ import { normalizeAgentId } from "../../routing/session-key.js";
 import { OpenClawStateLeaseAcquisitionError } from "../../state/openclaw-state-lease-error.js";
 import { prepareCurrentGitHubPublicationOptionsIdentity } from "../github-publication-availability.js";
 import { GitHubPublicationKnownFailure } from "../github-publication-failure.js";
+import { captureGitHubPublicationRequester } from "../github-publication-requester.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { SessionMutationAuthorizationChangedError } from "../session-sharing.js";
 import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
@@ -141,19 +142,25 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
         return;
       }
       sessionMutationAuthorization?.assertCurrent();
-      const result = await coordinator.requestForSession({
-        ...params,
+      const session = {
         sessionKey: loaded.canonicalKey,
         agentId: caller?.agentId ?? loaded.agentId,
-        ...(caller?.operationalRunInstance?.runId
-          ? { expectedRunId: caller.operationalRunInstance.runId }
-          : {}),
-        ...(sessionMutationAuthorization
-          ? { assertCurrent: sessionMutationAuthorization.assertCurrent }
-          : {}),
-      });
-      sessionMutationAuthorization?.assertCurrent();
-      respond(true, result);
+      };
+      const admitted = await captureGitHubPublicationRequester(options, session);
+      try {
+        const result = await coordinator.requestForSession({
+          ...params,
+          ...session,
+          requester: admitted.requester,
+          ...(caller?.operationalRunInstance?.runId
+            ? { expectedRunId: caller.operationalRunInstance.runId }
+            : {}),
+        });
+        sessionMutationAuthorization?.assertCurrent();
+        respond(true, result);
+      } finally {
+        admitted.release();
+      }
     },
   ),
   "sessions.github.options": defineSessionGitHubMethod(
@@ -196,15 +203,18 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
       if (action && personal) {
         personal = service!.revalidateStatus(action, personal);
       }
-      const latestShared = coordinator.latestShared(session, options.params.idempotencyKey);
+      const latestShared = await coordinator.latestShared(session, options.params.idempotencyKey);
       read.currentSession();
+      if (action && personal) {
+        personal = service!.revalidateStatus(action, personal);
+      }
       options.respond(true, { personal, shared, pendingPersonal, latestShared });
     },
   ),
   "sessions.github.status": defineSessionGitHubMethod(
     "sessions.github.status",
     validateSessionGitHubStatusParams,
-    (options) => {
+    async (options) => {
       const read = prepareGitHubPublicationOptionsRead(options, options.params);
       const service = options.context.githubPublicationService;
       if (!service) {
@@ -218,8 +228,9 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
         );
         return;
       }
+      const prepared = await service.preparePersonalStatus(options.params.requestId);
       const session = read.currentSession();
-      const shared = service.sharedStatus(session, options.params.requestId);
+      const shared = await service.sharedStatus(session, options.params.requestId);
       if (shared) {
         read.currentSession();
         options.respond(true, shared);
@@ -232,6 +243,7 @@ export const sessionsGitHubHandlers: GatewayRequestHandlers = {
         read.personal.action,
         session,
         options.params.requestId,
+        prepared,
       );
       read.currentSession();
       options.respond(true, result);

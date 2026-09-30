@@ -23,12 +23,9 @@ import {
 } from "./session-accessor.sqlite-lifecycle-state.js";
 import type { LifecycleArtifactCleanupPlan } from "./session-accessor.sqlite-lifecycle-types.js";
 import { collectSessionStateIdsForEntry } from "./session-accessor.sqlite-references.js";
-import {
-  cloneSessionEntry,
-  getSessionKysely,
-  withSqliteSessionDatabase,
-} from "./session-accessor.sqlite-scope.js";
+import { getSessionKysely, withSqliteSessionDatabase } from "./session-accessor.sqlite-scope.js";
 import { assertCanonicalSqliteSessionKeysCurrent } from "./session-canonical-key.js";
+import { transcriptEventJsonSql } from "./transcript-payload.js";
 
 function sessionKeySegmentStartsWith(sessionKey: string, prefix: string): boolean {
   const firstSeparator = sessionKey.indexOf(":");
@@ -103,7 +100,7 @@ function sqliteTranscriptStateHasMarker(params: {
       params.database.db,
       db
         .selectFrom("transcript_events")
-        .select("event_json")
+        .select(transcriptEventJsonSql(params.database.db).as("event_json"))
         .where("session_id", "=", params.sessionId)
         .orderBy("seq", "asc"),
     );
@@ -395,7 +392,7 @@ function planSessionLifecycleArtifactCleanup(
         removedSessionIds.add(sessionId);
       }
       entries.push({
-        expectedEntry: entry ? cloneSessionEntry(entry) : undefined,
+        expectedEntry: entry ? structuredClone(entry) : undefined,
         sessionKey: row.session_key,
       });
       delete projectedStore[row.session_key];
