@@ -8,7 +8,7 @@ const CONFIG_INCLUDE_OWNERSHIP_CODE = "CONFIG_INCLUDE_OWNERSHIP";
 const CONFIG_WRITE_REJECTED_CODE = "CONFIG_WRITE_REJECTED";
 
 const CONFIG_WRITE_SAFETY_REJECTION_MESSAGE =
-  "OpenClaw blocked this config update because it looked like it could overwrite or remove existing settings. Your current config was left unchanged. Run openclaw doctor --fix, then retry.";
+  "OpenClaw blocked this config update because it looked like it could overwrite or remove existing settings. Your current config was left unchanged. Correct the proposed update so it preserves existing settings, then retry. If the saved config is already invalid, run openclaw doctor --fix first.";
 
 export type ConfigWriteRollbackStatus = "restored" | "not-restored" | "unknown";
 

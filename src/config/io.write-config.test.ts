@@ -934,7 +934,7 @@ describe("config io write", () => {
           code: "CONFIG_WRITE_REJECTED",
           reasons: ["gateway-mode-removed"],
         });
-        expect(rejection?.message).toContain("OpenClaw blocked this config update");
+        expect(rejection?.message).toMatch(/Correct the proposed update.+invalid.+doctor --fix/);
         const audit = listConfigAuditRecordsForTests({ env: io.env, homedir: () => home }).find(
           (record) => record.event === "config.write" && record.configPath === configPath,
         );
