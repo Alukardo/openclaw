@@ -94,20 +94,20 @@ export function renderModelSetupWizard(props: WizardViewProps): TemplateResult |
                                 class="callout danger"
                                 role="alert"
                               >
-                                 ${props.state.validationError}
-                               </div>`
+                                ${props.state.validationError}
+                              </div>`
                             : nothing
                         }
                         ${renderWizardStepControls({
                           step: props.state.step,
                           externalAuthInput: props.state.externalAuthInput,
-                           value: props.value,
-                           busy: props.state.busy,
-                           inputId: WIZARD_TEXT_INPUT_ID,
-                           validationErrorId: props.state.validationError
-                             ? "model-setup-wizard-validation-error"
-                             : undefined,
-                           confirmAffirmativeLabel:
+                          value: props.value,
+                          busy: props.state.busy,
+                          inputId: WIZARD_TEXT_INPUT_ID,
+                          validationErrorId: props.state.validationError
+                            ? "model-setup-wizard-validation-error"
+                            : undefined,
+                          confirmAffirmativeLabel:
                             props.mode === "prepare" && props.state.step.type === "confirm"
                               ? t("modelSetup.wizard.continue")
                               : undefined,
@@ -127,8 +127,8 @@ export function renderModelSetupWizard(props: WizardViewProps): TemplateResult |
                           !props.state.step.deviceCode
                             ? html`<div role="status">${t("modelSetup.wizard.working")}</div>`
                             : nothing
-                         }
-                       `
+                        }
+                      `
           }
         </div>
         ${
