@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
+import { evaluateWorkflowRunner } from "./ci-workflow.test-support.js";
 
 const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8"));
 const job = workflow.jobs["android-access-native"];
@@ -14,7 +15,9 @@ const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 function verifyReports(mode: string) {
   const root = tempDirs.make("openclaw-access-reports-");
   const verification = step.run.split("python3 - <<'PY'\n")[1]?.split("\nPY")[0];
-  if (!verification) throw new Error("Missing native report verification");
+  if (!verification) {
+    throw new Error("Missing native report verification");
+  }
   return spawnSync(
     "python3",
     [
@@ -49,9 +52,13 @@ with zipfile.ZipFile(apk, 'w') as archive:
 describe("Android Access native workflow", () => {
   it("runs the packaged class on current Android targets and includes its result in CI", () => {
     expect(job.permissions).toEqual({ contents: "read" });
-    expect(job["runs-on"]).toBe("ubuntu-24.04");
-    expect(job.if).toContain("run_android_job == 'true'");
-    expect(job.if).toContain("compatibility_target != 'true'");
+    expect(evaluateWorkflowRunner(job["runs-on"], { eventName: "pull_request" })).toBe(
+      "ubuntu-24.04",
+    );
+    expect(workflow.jobs.preflight.outputs.run_android_access_native).toBe(
+      "${{ steps.manifest.outputs.run_android_access_native }}",
+    );
+    expect(job.if).toBe("needs.preflight.outputs.run_android_access_native == 'true'");
     expect(step.run).toContain(":app:connectedPlayDebugAndroidTest");
     expect(step.run).toContain(
       "-Pandroid.testInstrumentationRunnerArguments.class=ai.openclaw.app.gateway.CloudflareAccessNativeTest",
@@ -59,8 +66,11 @@ describe("Android Access native workflow", () => {
     expect(step.run).toContain('zipalign" -c -P 16 -v 4');
     expect(step.run).toContain('zipalign" -c -P 16 -v 4 "$apk"');
     expect(workflow.jobs["ci-gate"].needs).toContain("android-access-native");
-    expect(workflow.jobs["ci-gate"].steps[0].env.JOB_RESULTS).toContain(
-      "android-access-native=${{ needs.android-access-native.result }}|",
+    const aggregate = workflow.jobs["ci-gate"].steps.find(
+      (entry: { name?: string }) => entry.name === "Verify selected CI lanes",
+    );
+    expect(aggregate.env.JOB_RESULTS).toContain(
+      "android-access-native=${{ needs.android-access-native.result }}|${{ needs.preflight.outputs.run_android_access_native }}",
     );
   });
 

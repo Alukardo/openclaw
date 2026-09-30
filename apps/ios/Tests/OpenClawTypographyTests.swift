@@ -32,6 +32,27 @@ struct OpenClawTypographyTests {
         #expect(dashboard.contains(".font(OpenClawType.body)"))
     }
 
+    @Test func `file attachment controls use branded typography`() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("shared/OpenClawKit/Sources/OpenClawChatUI/ChatFileAttachment.swift"),
+            encoding: .utf8)
+        #expect(source.contains(".font(OpenClawChatTypography.footnote)"))
+        #expect(source.contains(".font(OpenClawChatTypography.caption)"))
+        #expect(source.contains(".font(OpenClawChatTypography.body)"))
+        #expect(!source.contains(".font(."))
+    }
+
+    @Test func `gateway picker uses branded typography`() throws {
+        let source = try String(
+            contentsOf: Self.sourceURL("RootSidebarGatewayControl.swift"),
+            encoding: .utf8)
+        #expect(source.contains(".font(OpenClawType.subheadSemiBold)"))
+        #expect(source.contains(".font(OpenClawType.captionMedium)"))
+        #expect(!source.contains(".font(."))
+    }
+
     @Test func `thread controls use branded typography`() throws {
         let support = try String(
             contentsOf: Self.sourceURL("Design/CommandCenterSupport.swift"),
@@ -385,7 +406,6 @@ struct OpenClawTypographyTests {
         #expect(chatTab.contains("title: \"New chat in worktree\""))
         #expect(!chatTab.contains("title: String(localized: \"Sessions…\")"))
         #expect(chatTab.contains("title: \"New session options…\""))
-        #expect(chatTab.contains("title: \"Background tasks\""))
         #expect(chatTab.contains("title: \"Export transcript\""))
         #expect(chatTab.contains("title: \"Gateway settings\""))
         #expect(chatTab.contains("title: String(localized: \"Show reasoning & tool activity\")"))
@@ -627,7 +647,7 @@ struct OpenClawTypographyTests {
         let fontTokens = ["OpenClawType", "OpenClawChatTypography", "WatchClawType", "typography."]
         let sourceBytes = Array(source.utf8)
         let code = self.maskedSwiftCode(source)
-        guard !self.isWholeFileMacOSOnly(code) else { return [] }
+        guard !self.isCompleteMacOSSourceEnvelope(code) else { return [] }
         let imageFontRanges = Set(self.directImageFontModifierRanges(in: code))
         var offenders: [String] = []
 
@@ -926,7 +946,7 @@ extension OpenClawTypographyTests {
             ("// #if os(macOS)\n\(font)\n// #endif", false),
         ]
         for (source, isMacOSOnly) in cases {
-            #expect(Self.isWholeFileMacOSOnly(Self.maskedSwiftCode(source)) == isMacOSOnly)
+            #expect(Self.isCompleteMacOSSourceEnvelope(Self.maskedSwiftCode(source)) == isMacOSOnly)
             #expect(Self.unbrandedTextCallOffenders(in: source, relativePath: "Sample.swift").isEmpty == isMacOSOnly)
         }
     }
@@ -980,7 +1000,38 @@ extension OpenClawTypographyTests {
         return withoutUses.components(separatedBy: "formFont").count == 2 && compact.contains(definition)
     }
 
-    private static func isWholeFileMacOSOnly(_ code: [UInt8]) -> Bool {
+    @Test func `font boundary scanner excludes only complete macOS source envelopes`() {
+        let macOnly = """
+        // A shared directory can contain a macOS-only view.
+        #if os(macOS)
+        #if DEBUG
+        let example = "#endif"
+        #else
+        /* #endif */
+        #endif
+        Text("Mac").font(.system(size: 12))
+        #endif
+        """
+        #expect(Self.unbrandedTextCallOffenders(in: macOnly, relativePath: "Mac.swift").isEmpty)
+
+        for condition in ["os(iOS)", "os(watchOS)", "os(macOS) || os(iOS)"] {
+            let source = "#if \(condition)\nText(\"Visible\").font(.body)\n#endif"
+            #expect(Self.unbrandedTextCallOffenders(in: source, relativePath: "Visible.swift") == [
+                "Visible.swift:2: .font(.body)",
+            ])
+        }
+        for alternate in ["#else", "#elseif os(iOS)"] {
+            let source = "#if os(macOS)\n\(alternate)\nText(\"Visible\").font(.caption)\n#endif"
+            #expect(Self.unbrandedTextCallOffenders(in: source, relativePath: "Mixed.swift") == [
+                "Mixed.swift:3: .font(.caption)",
+            ])
+        }
+        let shared = macOnly + "\nText(\"Shared\").font(.body)"
+        #expect(Self.unbrandedTextCallOffenders(in: shared, relativePath: "Shared.swift").last ==
+            "Shared.swift:10: .font(.body)")
+    }
+
+    private static func isCompleteMacOSSourceEnvelope(_ code: [UInt8]) -> Bool {
         guard let source = String(bytes: code, encoding: .utf8) else { return false }
         let lines = source.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

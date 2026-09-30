@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationGatewaySnapshot } from "../../app/context.ts";
+import { openSessionMenu, sessionMenuChoice, selectSessionMenuValue } from "../app-sidebar-menu.ts";
 import {
   createGateway,
   createGatewayHarness,
@@ -14,34 +15,6 @@ import {
   setEffectiveOwner,
 } from "./session-ownership-avatars.ts";
 import "../../components/app-sidebar.ts";
-
-async function openOwnerMenu(sidebar: SidebarLifecycleState): Promise<HTMLElement> {
-  const trigger = sidebar.querySelector<HTMLButtonElement>(".sidebar-session-sort");
-  if (!trigger) {
-    throw new Error("expected session sort trigger");
-  }
-  trigger.click();
-  await sidebar.updateComplete;
-  const menu = sidebar.querySelector<HTMLElement>(".sidebar-session-sort-menu");
-  if (!menu) {
-    throw new Error("expected session sort menu");
-  }
-  return menu;
-}
-
-export async function selectSessionMenuValue(sidebar: SidebarLifecycleState, value: string) {
-  const menu = await openOwnerMenu(sidebar);
-  expect(menu.querySelector(`[value="${value}"]`)).not.toBeNull();
-  menu.dispatchEvent(
-    new CustomEvent("wa-select", {
-      bubbles: true,
-      detail: { item: { value } },
-    }),
-  );
-  await sidebar.updateComplete;
-  await waitForFast(() => expect(sidebar.sessionData.sessionsLoading).toBe(false));
-  await sidebar.updateComplete;
-}
 
 async function expectSort(sidebar: SidebarLifecycleState, mode: string, keys: string[]) {
   await selectSessionMenuValue(sidebar, `sort:${mode}`);
@@ -87,35 +60,34 @@ describe("AppSidebar session ownership", () => {
     expect(sidebar.sessionData.sessionsResult?.owners).toHaveLength(2);
     expect(sidebar.querySelector('[data-session-key="agent:main:ada"]')).not.toBeNull();
     expect(sidebar.querySelectorAll("openclaw-session-owner-chip")).toHaveLength(1);
-    const menu = await openOwnerMenu(sidebar);
-    expect(menu.textContent).toContain("Owners");
-    expect(menu.querySelector('[value="owner:"]')).not.toBeNull();
-    expect(menu.querySelector('[value="owner:profile-ada"]')).not.toBeNull();
-    expect(menu.querySelector('[value="owner:profile-bob"]')).not.toBeNull();
-    menu.dispatchEvent(
-      new CustomEvent("wa-select", {
-        bubbles: true,
-        detail: { item: { value: "owner:profile-bob" } },
-      }),
-    );
-    await sidebar.updateComplete;
+    const menu = await openSessionMenu(sidebar);
+    expect(menu.querySelector('[data-value="owner:profile-ada"]')).not.toBeNull();
+    expect(menu.querySelector('[data-value="owner:profile-bob"]')).not.toBeNull();
+    await selectSessionMenuValue(sidebar, "owner:profile-bob");
     expect(harness.list).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "profile-bob" }));
 
     result.owners = [{ type: "human", id: "profile-bob", label: "Bob" }];
     harness.publishList({ result, agentId: "main" });
+    await sidebar.sessionData.refreshSidebarSessions();
     await sidebar.updateComplete;
     expect(sidebar.sessionOwnerFilterId).toBe("profile-bob");
 
     result.owners = undefined;
     harness.publishList({ result, agentId: "main" });
+    await sidebar.sessionData.refreshSidebarSessions();
     await sidebar.updateComplete;
     expect(sidebar.sessionOwnerFilterId).toBe("profile-bob");
     expect(sidebar.querySelector('[data-session-key="agent:main:ada"]')).toBeNull();
-    const unresolvedMenu = await openOwnerMenu(sidebar);
-    expect(unresolvedMenu.querySelector('[value="owner:"]')).not.toBeNull();
+    const unresolvedMenu = await openSessionMenu(sidebar);
+    await waitForFast(() =>
+      expect(unresolvedMenu.querySelector("#sidebar-sessions-owner")?.textContent).toContain(
+        "profile-bob",
+      ),
+    );
 
     result.owners = [{ type: "human", id: "profile-ada", label: "Ada" }];
     harness.publishList({ result, agentId: "main" });
+    await sidebar.sessionData.refreshSidebarSessions();
     await sidebar.updateComplete;
     await sidebar.updateComplete;
     expect(sidebar.sessionOwnerFilterId).toBeNull();
@@ -144,17 +116,16 @@ describe("AppSidebar session ownership", () => {
     harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
 
-    const menu = await openOwnerMenu(sidebar);
+    const menu = await openSessionMenu(sidebar);
     const ownerRows = [
-      ...menu.querySelectorAll<HTMLElement>('wa-dropdown-item[value^="owner:"]'),
-    ].filter((row) => row.getAttribute("value") !== "owner:");
-    expect(ownerRows.map((row) => row.getAttribute("value"))).toEqual([
+      ...menu.querySelectorAll<HTMLElement>('[role="option"][data-value^="owner:"]'),
+    ].filter((row) => row.getAttribute("data-value") !== "owner:");
+    expect(ownerRows.map((row) => row.getAttribute("data-value"))).toEqual([
       "owner:profile-patrick",
       "owner:profile-ayaan",
       "owner:profile-colin",
     ]);
-    expect(ownerRows[0]?.querySelector(".session-menu__text")?.textContent).toBe("Patrick (You)");
-    expect(ownerRows[0]?.querySelector("openclaw-session-owner-chip")).not.toBeNull();
+    expect(ownerRows[0]?.querySelector(".picker-select__label")?.textContent).toBe("Patrick (You)");
   });
 
   it.each([
@@ -226,6 +197,7 @@ describe("AppSidebar session ownership", () => {
       shared.participants = [];
       shared.participantCount = 5;
       harness.publishList({ result, agentId: "main" });
+      await sidebar.sessionData.refreshSidebarSessions();
       await sidebar.updateComplete;
       expect(sharedRow().querySelector(".session-owner-stack__overflow")?.textContent).toBe("+5");
 
@@ -328,42 +300,60 @@ describe("AppSidebar session ownership", () => {
     },
   );
 
-  it("renders no ownership chrome when owners and participants resolve to one identity", async () => {
-    const gateway = createGatewayHarness({} as GatewayBrowserClient);
-    gateway.publish({
-      selfUser: {
-        id: "profile-ada",
-        name: "Ada",
-        avatarUrl: "/api/users/profile-ada/avatar",
-      },
-    });
-    const harness = createSessionsHarness("main", [
-      "agent:main:main",
-      "agent:main:a",
-      "agent:main:b",
-    ]);
-    const result = harness.sessions.state.result;
-    if (!result) {
-      throw new Error("expected session list");
-    }
-    for (const row of result.sessions) {
-      setEffectiveOwner(row, { type: "human", id: "profile-ada", label: "Ada" });
-      row.participants = [{ identity: { type: "profile", id: "profile-ada" }, label: "Ada" }];
-      row.participantCount = 1;
-    }
-    const { sidebar } = await mountSidebar(gateway.gateway, harness.sessions);
-    harness.publishList({ result, agentId: "main" });
-    await sidebar.updateComplete;
+  it.each(["self", "agent owner", "agent participant", "truncated agents"])(
+    "hides session-row owner avatars for one human with %s",
+    async (scenario) => {
+      const gateway = createGatewayHarness({} as GatewayBrowserClient);
+      gateway.publish({
+        selfUser: {
+          id: "profile-ada",
+          name: "Ada",
+          avatarUrl: "/api/users/profile-ada/avatar",
+        },
+      });
+      const harness = createSessionsHarness("main", [
+        "agent:main:main",
+        "agent:main:a",
+        "agent:main:b",
+      ]);
+      const result = harness.sessions.state.result;
+      if (!result) {
+        throw new Error("expected session list");
+      }
+      for (const row of result.sessions) {
+        setEffectiveOwner(row, { type: "human", id: "profile-ada", label: "Ada" });
+        row.participants = [{ identity: { type: "profile", id: "profile-ada" }, label: "Ada" }];
+        row.participantCount = 1;
+      }
+      const ada = { type: "human" as const, id: "profile-ada", label: "Ada" };
+      const agent = { type: "agent" as const, id: "research", label: "Research" };
+      result.owners = [ada];
+      if (scenario === "agent owner") {
+        result.owners.push(agent);
+        setEffectiveOwner(result.sessions[2]!, agent);
+      }
+      if (scenario === "agent participant" || scenario === "truncated agents") {
+        result.sessions[1]!.participants = [{ identity: { type: "agent", id: "research" } }];
+        result.sessions[1]!.participantCount = scenario === "truncated agents" ? 5 : 1;
+      }
+      const { sidebar } = await mountSidebar(gateway.gateway, harness.sessions);
+      harness.publishList({ result, agentId: "main" });
+      await sidebar.updateComplete;
 
-    const menu = await openOwnerMenu(sidebar);
-    expect(
-      [...menu.querySelectorAll(".sidebar-session-sort-menu__title")].some(
-        (title) => title.textContent?.trim() === "Owners",
-      ),
-    ).toBe(false);
-    expect(menu.querySelector('[value^="owner:"]')).toBeNull();
-    expect(sidebar.querySelector("openclaw-session-owner-chip")).toBeNull();
-  });
+      expect(
+        sidebar.querySelector(".sidebar-recent-session openclaw-session-owner-chip"),
+      ).toBeNull();
+
+      // A second human participant enables attribution even without another owner.
+      result.sessions[1]!.participants = [{ identity: { type: "profile", id: "profile-bob" } }];
+      result.sessions[1]!.participantCount = 1;
+      harness.publishList({ result, agentId: "main" });
+      await sidebar.updateComplete;
+      expect(
+        sidebar.querySelector('[data-session-key="agent:main:a"] openclaw-session-owner-chip'),
+      ).not.toBeNull();
+    },
+  );
 
   it("owns People availability and fallback at the live session-owner roster", async () => {
     const gateway = createGatewayHarness({} as GatewayBrowserClient);
@@ -397,10 +387,10 @@ describe("AppSidebar session ownership", () => {
     harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
 
-    let menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="sort:people"]')).toBeNull();
-    expect(menu.querySelector('[value="sort:created"]')?.getAttribute("aria-checked")).toBe("true");
-    menu.dispatchEvent(new Event("wa-after-hide", { bubbles: true }));
+    let menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "sort:people")).toBeNull();
+    expect(sessionMenuChoice(menu, "sort:created")?.getAttribute("aria-selected")).toBe("true");
+    sidebar.dismissTransientMenus();
     await sidebar.updateComplete;
 
     result.owners = [
@@ -412,12 +402,25 @@ describe("AppSidebar session ownership", () => {
     await sidebar.updateComplete;
     await expectSort(sidebar, "people", peopleOrder);
 
-    gateway.publish({ hello: null });
+    result.owners = undefined;
+    harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
-    menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="sort:people"]')?.getAttribute("aria-checked")).toBe("true");
+    menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "sort:people")?.getAttribute("aria-selected")).toBe("true");
     expect(visibleSessionKeys(sidebar)).toEqual(peopleOrder);
-    menu.dispatchEvent(new Event("wa-after-hide", { bubbles: true }));
+    sidebar.dismissTransientMenus();
+    await sidebar.updateComplete;
+
+    result.owners = [
+      { type: "human", id: "profile-ada", label: "Ada" },
+      { type: "human", id: "profile-bob", label: "Bob" },
+    ];
+    harness.publishList({ result, agentId: "main" });
+    await sidebar.updateComplete;
+    menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "sort:people")?.getAttribute("aria-selected")).toBe("true");
+    expect(visibleSessionKeys(sidebar)).toEqual(peopleOrder);
+    sidebar.dismissTransientMenus();
     await sidebar.updateComplete;
 
     await expectSort(sidebar, "updated", updatedOrder);
@@ -429,10 +432,10 @@ describe("AppSidebar session ownership", () => {
     await sidebar.updateComplete;
     await sidebar.updateComplete;
 
-    menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="sort:people"]')).toBeNull();
-    expect(menu.querySelector('[value="sort:created"]')?.getAttribute("aria-checked")).toBe("true");
-    menu.dispatchEvent(new Event("wa-after-hide", { bubbles: true }));
+    menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "sort:people")).toBeNull();
+    expect(sessionMenuChoice(menu, "sort:created")?.getAttribute("aria-selected")).toBe("true");
+    sidebar.dismissTransientMenus();
     result.owners = [
       { type: "human", id: "profile-ada", label: "Ada" },
       { type: "human", id: "profile-bob", label: "Bob" },
@@ -440,9 +443,9 @@ describe("AppSidebar session ownership", () => {
     gateway.publish({ hello: sessionSharingHello(false) });
     harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
-    menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="sort:people"]')).not.toBeNull();
-    expect(menu.querySelector('[value="sort:created"]')?.getAttribute("aria-checked")).toBe("true");
+    menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "sort:people")).not.toBeNull();
+    expect(sessionMenuChoice(menu, "sort:created")?.getAttribute("aria-selected")).toBe("true");
   });
 
   it("groups sessions by owner based on the live session-owner roster", async () => {
@@ -478,9 +481,9 @@ describe("AppSidebar session ownership", () => {
     harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
 
-    let menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="grouping:person"]')).not.toBeNull();
-    menu.dispatchEvent(new Event("wa-after-hide", { bubbles: true }));
+    let menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "grouping:person")).not.toBeNull();
+    sidebar.dismissTransientMenus();
     await sidebar.updateComplete;
 
     await selectSessionMenuValue(sidebar, "grouping:person");
@@ -514,27 +517,34 @@ describe("AppSidebar session ownership", () => {
         ?.getAttribute("aria-label"),
     ).toBe("Show only Zoe");
 
-    gateway.publish({ hello: null });
+    result.owners = undefined;
+    harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
     expect(ownerSections()).toHaveLength(2);
-    menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="grouping:person"]')?.getAttribute("aria-checked")).toBe(
-      "true",
-    );
-    menu.dispatchEvent(new Event("wa-after-hide", { bubbles: true }));
+    menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "grouping:person")?.getAttribute("aria-selected")).toBe("true");
+    sidebar.dismissTransientMenus();
     await sidebar.updateComplete;
+
+    result.owners = [
+      { type: "human", id: "profile-ada", label: "Ada" },
+      { type: "human", id: "profile-zoe", label: "Zoe" },
+    ];
+    harness.publishList({ result, agentId: "main" });
+    await sidebar.updateComplete;
+    expect(ownerSections()).toHaveLength(2);
 
     gateway.publish({ hello: sessionSharingHello(true) });
     result.owners = [{ type: "human", id: "profile-zoe", label: "Zoe" }];
     harness.publishList({ result, agentId: "main" });
     await sidebar.updateComplete;
     expect(ownerSections()).toHaveLength(0);
-    menu = await openOwnerMenu(sidebar);
-    expect(menu.querySelector('[value="grouping:person"]')).toBeNull();
-    expect(menu.querySelector('[value="grouping:category"]')?.getAttribute("aria-checked")).toBe(
+    menu = await openSessionMenu(sidebar);
+    expect(sessionMenuChoice(menu, "grouping:person")).toBeNull();
+    expect(sessionMenuChoice(menu, "grouping:category")?.getAttribute("aria-selected")).toBe(
       "true",
     );
-    menu.dispatchEvent(new Event("wa-after-hide", { bubbles: true }));
+    sidebar.dismissTransientMenus();
 
     result.owners = [
       { type: "human", id: "profile-ada", label: "Ada" },

@@ -77,6 +77,11 @@ For providers that discover their default model at initialization, plain status
 defers model identity checks until that model is known. Use `--deep` to initialize
 the provider and verify the model and provider settings against the existing index.
 
+Session eligibility excludes unindexed transcripts whose parsed content is
+entirely system-generated, matching the indexer's admission rules. These
+transcripts do not keep status dirty; later user content makes them eligible
+for indexing again.
+
 ## `memory index`
 
 ```bash
@@ -96,6 +101,9 @@ original sessions are no longer active. Sessions previously selected by
 both groups without reindexing their retained transcripts. Ordinary retained,
 reset, and deleted user-session archives remain eligible until explicitly
 targeted.
+
+Full rebuilds wait for temporary database cleanup before reporting completion.
+File removal runs asynchronously so cleanup does not block the Gateway event loop.
 
 When an embedding provider rate-limits indexing, each embedding operation gets
 up to five attempts. Retries honor valid provider cooldown hints, capped at
@@ -276,7 +284,9 @@ and remain selected.
 
 Preview and apply use the same matching logic, but each reads current state;
 a preview is not an immutable plan or a lock on subsequent writes. Apply
-coordinates with the memory plugin's staging and file mutations. Indexing
+coordinates with the memory plugin's staging and file mutations. It rechecks
+selected lineage after preparation and refreshes the plan if it changed, while
+retaining entries already identified as belonging to the selected sessions. Indexing
 discards stale results instead of restoring purged chunks or cached embeddings;
 rerun an index command that reports a source change. Direct agent edits and
 external writers do not share that lock, so pause them during a sensitive

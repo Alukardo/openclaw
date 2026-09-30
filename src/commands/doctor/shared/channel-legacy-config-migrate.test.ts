@@ -11,13 +11,17 @@ const { applyPluginDoctorCompatibilityMigrations, collectRelevantDoctorPluginIds
 const loadBundledChannelDoctorContractApi = vi.hoisted(() => vi.fn());
 const getBootstrapChannelPlugin = vi.hoisted(() => vi.fn());
 
-vi.mock("../../../plugins/doctor-contract-registry.js", () => ({
-  collectDoctorConfigRepairPluginIds: (...args: unknown[]) =>
-    collectRelevantDoctorPluginIds(...args),
-  applyPluginDoctorCompatibilityMigrations: (...args: unknown[]) =>
-    applyPluginDoctorCompatibilityMigrations(...args),
-  collectRelevantDoctorPluginIds: (...args: unknown[]) => collectRelevantDoctorPluginIds(...args),
-}));
+vi.mock(import("../../../plugins/doctor-contract-registry.js"), async (importOriginal) => {
+  const { isPluginDoctorMigrationDeferred } = await importOriginal();
+  return {
+    isPluginDoctorMigrationDeferred,
+    collectDoctorConfigRepairPluginIds: (...args: unknown[]) =>
+      collectRelevantDoctorPluginIds(...args),
+    applyPluginDoctorCompatibilityMigrations: (...args: unknown[]) =>
+      applyPluginDoctorCompatibilityMigrations(...args),
+    collectRelevantDoctorPluginIds: (...args: unknown[]) => collectRelevantDoctorPluginIds(...args),
+  };
+});
 
 vi.mock("../../../channels/plugins/doctor-contract-api.js", () => ({
   loadBundledChannelDoctorContractApi: (...args: unknown[]) =>
@@ -152,83 +156,27 @@ describe("bundled channel legacy config migrations", () => {
     expect(result.changes).toEqual(["Normalized channels.slack via bundled doctor contract."]);
   });
 
-  it("normalizes legacy private-network aliases exposed through bundled contract surfaces", () => {
+  it("uses registry fallback when a bundled channel contract is unavailable", () => {
     collectRelevantDoctorPluginIds.mockReturnValueOnce(["mattermost"]);
     loadBundledChannelDoctorContractApi.mockReturnValue(undefined);
     getBootstrapChannelPlugin.mockReturnValue(undefined);
-    applyPluginDoctorCompatibilityMigrations.mockReturnValueOnce({
-      config: {
-        channels: {
-          mattermost: {
-            network: {
-              dangerouslyAllowPrivateNetwork: true,
-            },
-            accounts: {
-              work: {
-                network: {
-                  dangerouslyAllowPrivateNetwork: false,
-                },
-              },
-            },
-          },
-        },
-      },
-      changes: [
-        "Moved channels.mattermost.allowPrivateNetwork → channels.mattermost.network.dangerouslyAllowPrivateNetwork (true).",
-        "Moved channels.mattermost.accounts.work.allowPrivateNetwork → channels.mattermost.accounts.work.network.dangerouslyAllowPrivateNetwork (false).",
-      ],
-    });
-
-    const result = applyChannelDoctorCompatibilityMigrations({
-      channels: {
-        mattermost: {
-          allowPrivateNetwork: true,
-          accounts: {
-            work: {
-              allowPrivateNetwork: false,
-            },
-          },
-        },
-      },
-    });
-
-    expect(applyPluginDoctorCompatibilityMigrations).toHaveBeenCalledOnce();
-    const migrationCall = firstMigrationCall();
-    expect(typeof migrationCall?.[0]).toBe("object");
-    expect(migrationCall?.[1]?.config).toStrictEqual({
-      channels: {
-        mattermost: {
-          allowPrivateNetwork: true,
-          accounts: {
-            work: {
-              allowPrivateNetwork: false,
-            },
-          },
-        },
-      },
-    });
-    expect(migrationCall?.[1]?.pluginIds).toStrictEqual(["mattermost"]);
-
-    const nextChannels = (result.next.channels ?? {}) as {
-      mattermost?: Record<string, unknown>;
+    const config = { channels: { mattermost: { allowPrivateNetwork: true } } };
+    const migrated = {
+      channels: { mattermost: { network: { dangerouslyAllowPrivateNetwork: true } } },
     };
+    const changes = ["Migrated channel config."];
+    applyPluginDoctorCompatibilityMigrations.mockReturnValueOnce({ config: migrated, changes });
 
-    expect(nextChannels.mattermost).toEqual({
-      network: {
-        dangerouslyAllowPrivateNetwork: true,
-      },
-      accounts: {
-        work: {
-          network: {
-            dangerouslyAllowPrivateNetwork: false,
-          },
-        },
-      },
+    const result = applyChannelDoctorCompatibilityMigrations(config);
+
+    expect(loadBundledChannelDoctorContractApi).toHaveBeenCalledWith("mattermost");
+    expect(getBootstrapChannelPlugin).toHaveBeenCalledWith("mattermost");
+    expect(applyPluginDoctorCompatibilityMigrations).toHaveBeenCalledTimes(1);
+    expect(applyPluginDoctorCompatibilityMigrations).toHaveBeenCalledWith(config, {
+      config,
+      pluginIds: ["mattermost"],
     });
-    expect(result.changes).toStrictEqual([
-      "Moved channels.mattermost.allowPrivateNetwork → channels.mattermost.network.dangerouslyAllowPrivateNetwork (true).",
-      "Moved channels.mattermost.accounts.work.allowPrivateNetwork → channels.mattermost.accounts.work.network.dangerouslyAllowPrivateNetwork (false).",
-    ]);
+    expect(result).toEqual({ next: migrated, changes });
   });
 
   it("applies plugin doctor normalizers for configured non-channel plugin entries", () => {

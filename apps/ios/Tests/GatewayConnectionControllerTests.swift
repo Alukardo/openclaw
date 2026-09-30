@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import Network
+import Observation
 import OpenClawChatUI
 import os
 import Testing
@@ -47,6 +48,7 @@ private func saveActiveManualGateway(
     return GatewaySettingsStore.upsertGatewayRegistryEntry(entry, activate: true)
 }
 
+@MainActor
 struct GatewayRegistryTestIsolation {
     private static let service = GatewaySettingsStore._testGatewayService
     private static let keychainAccounts = [
@@ -67,17 +69,17 @@ struct GatewayRegistryTestIsolation {
     private let previousDefaults: [String: Any?]
     private let previousRelay: ShareGatewayRelayConfig?
 
-    init() {
-        gatewayPersistenceTestSemaphore.wait()
+    init() async {
+        await GatewayPersistenceTestGate.shared.acquire()
         self.previousKeychain = Dictionary(uniqueKeysWithValues: Self.keychainAccounts.map { account in
-            (account, KeychainStore.loadString(service: Self.service, account: account))
+            (account, GenericPasswordKeychainStore.loadString(service: Self.service, account: account))
         })
         self.previousDefaults = Dictionary(uniqueKeysWithValues: Self.legacyDefaultsKeys.map { key in
             (key, UserDefaults.standard.object(forKey: key))
         })
         self.previousRelay = ShareGatewayRelaySettings.loadConfig()
         for account in Self.keychainAccounts {
-            _ = KeychainStore.delete(service: Self.service, account: account)
+            _ = GenericPasswordKeychainStore.delete(service: Self.service, account: account)
         }
         for key in Self.legacyDefaultsKeys {
             UserDefaults.standard.removeObject(forKey: key)
@@ -86,9 +88,9 @@ struct GatewayRegistryTestIsolation {
 
     func restore() {
         for (account, value) in self.previousKeychain {
-            _ = KeychainStore.delete(service: Self.service, account: account)
+            _ = GenericPasswordKeychainStore.delete(service: Self.service, account: account)
             if let value {
-                _ = KeychainStore.saveString(value, service: Self.service, account: account)
+                _ = GenericPasswordKeychainStore.saveString(value, service: Self.service, account: account)
             }
         }
         for (key, value) in self.previousDefaults {
@@ -101,7 +103,7 @@ struct GatewayRegistryTestIsolation {
         if let previousRelay {
             ShareGatewayRelaySettings.saveConfig(previousRelay)
         }
-        gatewayPersistenceTestSemaphore.signal()
+        GatewayPersistenceTestGate.shared.release()
     }
 }
 
@@ -340,8 +342,8 @@ private func pendingHandoffDiagnostic(
         }
     }
 
-    @Test @MainActor func `current caps reflect toggles`() {
-        withUserDefaults([
+    @Test @MainActor func `registration preserves capability toggles and command wire order`() async {
+        await withUserDefaults([
             "node.instanceId": "ios-test",
             "node.displayName": "Test Node",
             "camera.enabled": true,
@@ -353,18 +355,37 @@ private func pendingHandoffDiagnostic(
                 appModel: appModel,
                 startDiscovery: false,
                 ingress: makeOrdinaryIngress())
-            let caps = Set(controller._test_currentCaps())
+            let options = await controller.makeConnectOptions(stableID: nil, deviceAuthGatewayID: nil)
+            let caps = Set(options.caps)
 
             #expect(!caps.contains(OpenClawCapability.canvas.rawValue))
             #expect(caps.contains(OpenClawCapability.screen.rawValue))
             #expect(!caps.contains(OpenClawGatewayClientCapability.inlineWidgets))
+            #expect(!caps.contains(OpenClawGatewayClientCapability.modelSelectionPolicy))
             #expect(caps.contains(OpenClawCapability.camera.rawValue))
             #expect(caps.contains(OpenClawCapability.location.rawValue))
             #expect(caps.contains(OpenClawCapability.voiceWake.rawValue))
             #expect(caps.contains(OpenClawCapability.talk.rawValue))
 
-            let commands = controller._test_currentCommands()
-            #expect(!commands.contains(where: { $0.hasPrefix("canvas.") }))
+            var expectedCommands = [
+                "screen.record", "system.notify", "chat.push",
+                "talk.ptt.start", "talk.ptt.stop", "talk.ptt.cancel", "talk.ptt.once",
+                "camera.list", "camera.snap", "camera.clip", "location.get", "device.status", "device.info",
+            ]
+            if caps.contains("watch") {
+                expectedCommands += ["watch.status", "watch.notify"]
+            }
+            expectedCommands += [
+                "photos.latest", "contacts.search", "contacts.add", "calendar.events", "calendar.add",
+                "reminders.list", "reminders.add",
+            ]
+            if caps.contains("motion") {
+                expectedCommands += ["motion.activity", "motion.pedometer"]
+            }
+            if caps.contains("health") {
+                expectedCommands += ["health.summary"]
+            }
+            #expect(options.commands == expectedCommands)
         }
     }
 
@@ -477,6 +498,8 @@ private func pendingHandoffDiagnostic(
         #expect(withoutApprovalScope.caps == [
             OpenClawGatewayClientCapability.agentKind,
             OpenClawGatewayClientCapability.inlineWidgets,
+            OpenClawGatewayClientCapability.modelSelectionPolicy,
+            OpenClawGatewayClientCapability.ultrafast,
         ])
 
         #expect(withApprovalScope.scopes.contains("operator.approvals"))
@@ -1067,7 +1090,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `empty setup auth does not reuse stored gateway credentials`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let instanceID = "ios-test-\(UUID().uuidString)"
         let temporaryState = try TemporaryOpenClawState(instanceID: instanceID)
@@ -1113,7 +1136,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `setup context path survives registry reconnect`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let instanceID = "ios-context-path-\(UUID().uuidString)"
         let temporaryState = try TemporaryOpenClawState(instanceID: instanceID)
@@ -1172,8 +1195,8 @@ private func pendingHandoffDiagnostic(
         #expect(appModel.activeGatewayConnectConfig?.effectiveStableID == stored.stableID)
     }
 
-    @Test @MainActor func `legacy auth preserves proven relay credentials and otherwise requires full re-pair`() throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+    @Test @MainActor func `legacy auth preserves proven relay credentials and otherwise requires full re-pair`() async throws {
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let instanceID = "legacy-relay-\(UUID().uuidString)"
         let temporaryState = try TemporaryOpenClawState(instanceID: instanceID)
@@ -1250,7 +1273,7 @@ private func pendingHandoffDiagnostic(
         #expect(credentials.token == "proven-relay-token")
         #expect(credentials.password == "proven-relay-password")
         #expect(!credentials.suppressStoredDeviceAuth)
-        #expect(KeychainStore.loadString(
+        #expect(GenericPasswordKeychainStore.loadString(
             service: gatewayService,
             account: "gateway-token.\(instanceID)") == nil)
 
@@ -1603,7 +1626,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `target switch reset clears previous reconnect route`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let reconnectDefaults: [String: Any?] = [
             "gateway.autoconnect": true,
@@ -1719,7 +1742,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `newer explicit connect immediately invalidates queued config`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "new-target.gateway.invalid"
         let stableID = "manual|\(host.lowercased())|443"
@@ -1760,7 +1783,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `trusted certificate keeps device auth route scoped`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "127.0.0.1"
         let stableID = "manual|\(host)|1"
@@ -1781,7 +1804,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `discovered connect preserves exact device auth owner bytes`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let stableID = "\u{0085}gateway-e\u{0301}"
         let endpoint: NWEndpoint = .service(
@@ -1798,7 +1821,7 @@ private func pendingHandoffDiagnostic(
             tailnetDns: nil,
             gatewayPort: nil,
             tlsEnabled: true,
-            tlsFingerprintSha256: nil,
+            tlsFingerprintSha256: "untrusted-txt-fingerprint",
             cliPath: nil)
         let appModel = NodeAppModel()
         defer { appModel.disconnectGateway() }
@@ -1815,10 +1838,13 @@ private func pendingHandoffDiagnostic(
             }, ingress: makeOrdinaryIngress())
 
         #expect(await controller.connectWithDiagnostics(gateway) == nil)
+        #expect(controller.pendingTrustPrompt?.fingerprintSha256 == "exact-owner-fingerprint")
         await controller.acceptPendingTrustPrompt(controller.pendingTrustPrompt)
         let expectedGeneration = appModel.gatewayConnectGeneration
         await waitUntil(timeout: .seconds(1)) { appModel.activeGatewayConnectConfig != nil }
 
+        #expect(appModel.activeGatewayConnectConfig?.tls?.expectedFingerprint == "exact-owner-fingerprint")
+        #expect(appModel.activeGatewayConnectConfig?.tls?.allowTOFU == false)
         #expect(persistedOwnerBytes.withLock { $0 } == Array(stableID.utf8))
         #expect(
             appModel.activeGatewayConnectConfig.map { Array($0.stableID.utf8) } == Array(stableID.utf8),
@@ -1829,7 +1855,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `first trust aborts when certificate pin is not durable`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "127.0.0.1"
         let stableID = "manual|\(host)|2"
@@ -1898,7 +1924,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `cancel during forced reset restores current gateway`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "replacement.gateway.invalid"
         let stableID = "manual|\(host)|443"
@@ -1969,7 +1995,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `new connect waits for superseded forced reset`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let forceHost = "192.168.1.39"
 
@@ -2015,7 +2041,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `new connect waits for model owned reset barrier`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let resetRelease = AsyncStream<Void>.makeStream()
         let appModel = NodeAppModel()
@@ -2075,7 +2101,7 @@ private func pendingHandoffDiagnostic(
     @MainActor func `held reset retains recovery until replacement commits or cancels`(
         outcome: HeldResetOutcome) async throws
     {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         try await withUserDefaults(["gateway.autoconnect": false]) {
             let host = "replacement-\(UUID().uuidString).example.ts.net"
@@ -2191,7 +2217,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `trust decline releases suppression without reconnecting unpinned target`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let updates: [String: Any?] = [
             "gateway.autoconnect": false,
@@ -2226,9 +2252,12 @@ private func pendingHandoffDiagnostic(
             probe.results.continuation.finish()
             await connectTask.value
             #expect(controller.pendingTrustPrompt?.fingerprintSha256 == "explicit-fingerprint")
+            #expect(controller.hasPendingConnectionHandoff)
 
             controller.declinePendingTrustPrompt(controller.pendingTrustPrompt)
+            await waitUntil { !controller.hasPendingConnectionHandoff }
 
+            #expect(!controller.hasPendingConnectionHandoff)
             #expect(!controller._test_didAutoConnect())
             #expect(!controller._test_isAutoConnectSuppressed())
             #expect(appModel.activeGatewayConnectConfig == nil)
@@ -2236,7 +2265,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `active manual TLS auto connect uses system trust before legacy defaults`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "manual-autoconnect-\(UUID().uuidString).example.com"
         let stableID = "manual|\(host.lowercased())|443"
@@ -2291,7 +2320,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `active local manual gateway auto connects without TLS pin`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let stableID = "manual|127.0.0.1|1"
         defer {
@@ -2322,7 +2351,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `missing active discovered gateway auto connects to latest manual gateway`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let manualID = "manual|127.0.0.1|1"
         saveActiveManualGateway(host: "127.0.0.1", port: 1, useTLS: false, stableID: manualID)
@@ -2360,8 +2389,8 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test(arguments: [nil, false, true] as [Bool?]) @MainActor
-    func `share relay preserves the foreground sign in flag including legacy absence`(requiresSignIn: Bool?) throws {
-        let isolation = GatewayRegistryTestIsolation()
+    func `share relay preserves the foreground sign in flag including legacy absence`(requiresSignIn: Bool?) async throws {
+        let isolation = await GatewayRegistryTestIsolation()
         defer { isolation.restore() }
         let config = ShareGatewayRelayConfig(
             gatewayURLString: "wss://share-flags.example.test",
@@ -2381,8 +2410,8 @@ private func pendingHandoffDiagnostic(
         #expect(loaded == config)
     }
 
-    @Test @MainActor func `share relay keeps credentials out of app group defaults`() throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+    @Test @MainActor func `share relay keeps credentials out of app group defaults`() async throws {
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let token = "relay-token-\(UUID().uuidString)"
         let password = "relay-password-\(UUID().uuidString)"
@@ -2414,8 +2443,8 @@ private func pendingHandoffDiagnostic(
         #expect(mismatched.password == nil)
     }
 
-    @Test @MainActor func `share relay migrates legacy defaults credentials into keychain`() throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+    @Test @MainActor func `share relay migrates legacy defaults credentials into keychain`() async throws {
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let token = "legacy-token-\(UUID().uuidString)"
         let password = "legacy-password-\(UUID().uuidString)"
@@ -2442,7 +2471,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget gateway clears matching share relay only`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let stableID = "manual|forgotten.example.com|443"
         ShareGatewayRelaySettings.saveConfig(.init(
@@ -2464,7 +2493,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget manual gateway clears matching legacy auto connect defaults`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "forgotten.example.com"
         let port = 443
@@ -2493,7 +2522,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget gateway preserves legacy defaults for another manual gateway`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         await withUserDefaults([
             "gateway.manual.enabled": true,
@@ -2519,7 +2548,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget connected gateway waits for disconnect before device auth cleanup`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let connectedID = "manual|connected.example.com|443"
         let selectedID = "manual|selected.example.com|443"
@@ -2579,7 +2608,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget selected gateway preserves a different live route`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let selectedID = "manual|selected.example.com|443"
         let connectedID = "manual|connected.example.com|443"
@@ -2611,15 +2640,15 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget gateway clears only matching legacy discovery selectors`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let service = GatewaySettingsStore._testGatewayService
         let preferredAccount = "preferredStableID"
         let lastAccount = "lastDiscoveredStableID"
         let forgottenID = "bonjour|forgotten"
         let keptID = "bonjour|kept"
-        _ = KeychainStore.saveString(forgottenID, service: service, account: preferredAccount)
-        _ = KeychainStore.saveString(keptID, service: service, account: lastAccount)
+        _ = GenericPasswordKeychainStore.saveString(forgottenID, service: service, account: preferredAccount)
+        _ = GenericPasswordKeychainStore.saveString(keptID, service: service, account: lastAccount)
 
         await withUserDefaults([
             "gateway.preferredStableID": forgottenID,
@@ -2637,13 +2666,13 @@ private func pendingHandoffDiagnostic(
             let defaults = UserDefaults.standard
             #expect(defaults.object(forKey: "gateway.preferredStableID") == nil)
             #expect(defaults.string(forKey: "gateway.lastDiscoveredStableID") == keptID)
-            #expect(KeychainStore.loadString(service: service, account: preferredAccount) == nil)
-            #expect(KeychainStore.loadString(service: service, account: lastAccount) == keptID)
+            #expect(GenericPasswordKeychainStore.loadString(service: service, account: preferredAccount) == nil)
+            #expect(GenericPasswordKeychainStore.loadString(service: service, account: lastAccount) == keptID)
         }
     }
 
     @Test @MainActor func `forget gateway cancels its pending trust handoff`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "pending-trust.example.com"
         let port = 443
@@ -2665,7 +2694,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `manual trust handoff persists its context path`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let host = "context-path-trust.example.com"
         let contextPath = "/openclaw-gateway"
@@ -2694,7 +2723,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget gateway preserves another gateway pending trust handoff`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let pendingHost = "pending-kept.example.com"
         let pendingID = GatewayConnectionController.ManualAuthOverride.manualStableID(
@@ -2714,7 +2743,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `forget live gateway preserves replacement pending trust generation`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let connectedID = "manual|connected-before-forget.example.com|443"
         let replacementHost = "replacement-after-forget.example.com"
@@ -2827,7 +2856,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `failed replacement restores inherited scanner reconnect state`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let updates: [String: Any?] = [
             "gateway.autoconnect": true,
@@ -2864,7 +2893,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `foreground reconnect cannot replace queued explicit handoff`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let updates: [String: Any?] = [
             "gateway.autoconnect": false,
@@ -2927,7 +2956,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `clearing trust prompt invalidates in flight probe`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let probe = ControllableTLSProbe()
         let appModel = NodeAppModel()
@@ -2964,8 +2993,100 @@ private func pendingHandoffDiagnostic(
         #expect(appModel._test_hasGatewayLoopTasks().operator)
     }
 
+    private enum PickerHandoffOutcome: CaseIterable {
+        case commit
+        case cancel
+        case supersede
+        case failure
+    }
+
+    @Test(arguments: PickerHandoffOutcome.allCases)
+    @MainActor
+    private func `picker protection outlives acceptance until handoff or cancellation finishes`(
+        outcome: PickerHandoffOutcome) async throws
+    {
+        let registryIsolation = await GatewayRegistryTestIsolation()
+        defer { registryIsolation.restore() }
+        let currentID = "manual|127.0.0.1|1"
+        let targetID = "manual|127.0.0.1|2"
+        #expect(saveActiveManualGateway(host: "127.0.0.1", port: 1, useTLS: false, stableID: currentID))
+        #expect(GatewaySettingsStore.upsertGatewayRegistryEntry(.init(
+            stableID: targetID,
+            kind: .manual,
+            name: "Target",
+            host: "127.0.0.1",
+            port: 2,
+            useTLS: false,
+            lastConnectedAtMs: nil)))
+        let appModel = NodeAppModel()
+        let resetRelease = AsyncStream<Void>.makeStream()
+        defer {
+            resetRelease.continuation.finish()
+            appModel._test_setGatewaySessionResetTask(nil)
+            appModel.disconnectGateway()
+        }
+        let config = try Self.makeGatewayConnectConfig(
+            url: #require(URL(string: "ws://127.0.0.1:1")),
+            stableID: currentID)
+        appModel.applyGatewayConnectConfig(config)
+        let previousOwnerID = appModel.chatViewModelOwnerID
+        appModel._test_setGatewaySessionResetTask(Task {
+            for await _ in resetRelease.stream {
+                return
+            }
+        })
+        let controller = GatewayConnectionController(
+            appModel: appModel,
+            startDiscovery: false,
+            forceReconnectReset: { _ in })
+
+        appModel.isGatewayPickerRequestInFlight = true
+        let result = await controller.switchToGateway(stableID: targetID)
+        // Mirror the picker request's defer. This must not unlock Chat: the
+        // connection owner still has a queued handoff behind the reset barrier.
+        appModel.isGatewayPickerRequestInFlight = false
+        #expect(result == .accepted)
+        #expect(controller.hasPendingConnectionHandoff)
+        #expect(appModel.chatViewModelOwnerID == previousOwnerID)
+
+        let expectedID: String
+        switch outcome {
+        case .commit:
+            expectedID = targetID
+        case .cancel:
+            controller.cancelPendingConnectionAttempts()
+            expectedID = currentID
+        case .supersede:
+            let replacement = await controller.connectManual(host: "127.0.0.1", port: 3, useTLS: false)
+            #expect(replacement == .accepted)
+            expectedID = "manual|127.0.0.1|3"
+        case .failure:
+            let failed = await controller.connectManual(host: "127.0.0.1", port: 70000, useTLS: false)
+            #expect(failed == .failed("This paired gateway has an invalid saved endpoint."))
+            expectedID = currentID
+        }
+        #expect(controller.hasPendingConnectionHandoff)
+        #expect(appModel.chatViewModelOwnerID == previousOwnerID)
+
+        // In cancellation/failure cases only the queued restoration generation
+        // remains. Its completion must invalidate a SwiftUI observation too.
+        let invalidated = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = controller.hasPendingConnectionHandoff
+        } onChange: {
+            invalidated.withLock { $0 = true }
+        }
+        resetRelease.continuation.yield()
+        resetRelease.continuation.finish()
+        await waitUntil { !controller.hasPendingConnectionHandoff }
+
+        #expect(!controller.hasPendingConnectionHandoff)
+        #expect(invalidated.withLock { $0 })
+        #expect(appModel.activeGatewayConnectConfig?.effectiveStableID == expectedID)
+    }
+
     @Test @MainActor func `switch to manual gateway applies its stable I D and URL`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let stableID = "manual|127.0.0.1|1"
         saveActiveManualGateway(host: "127.0.0.1", port: 1, useTLS: false, stableID: stableID)
@@ -2986,7 +3107,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `switch to undiscoverable gateway returns failure without changing active gateway`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let activeID = "manual|127.0.0.1|1"
         let discoveredID = "bonjour|missing"
@@ -3014,7 +3135,7 @@ private func pendingHandoffDiagnostic(
 
     @Test @MainActor
     func `reconnect to active undiscoverable gateway returns failure without queuing connection`() async {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let discoveredID = "bonjour|missing-active"
         _ = GatewaySettingsStore.upsertGatewayRegistryEntry(.init(
@@ -3039,7 +3160,7 @@ private func pendingHandoffDiagnostic(
     }
 
     @Test @MainActor func `chat cache remains isolated when active gateway switches`() async throws {
-        let registryIsolation = GatewayRegistryTestIsolation()
+        let registryIsolation = await GatewayRegistryTestIsolation()
         defer { registryIsolation.restore() }
         let temporaryState = try TemporaryOpenClawState()
         defer { temporaryState.restore() }
