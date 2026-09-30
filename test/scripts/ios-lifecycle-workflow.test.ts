@@ -387,6 +387,8 @@ describe.skipIf(process.platform === "win32")("iOS Access simulator workflow", (
     expect(commands.at(-1)).toEqual({
       tool: "python3",
       args: ["scripts/ios-access-restart-proof.py", "watch-fixture"],
+      destination: "",
+      settings: "ARCHS = arm64\nCOMPILER_INDEX_STORE_ENABLE = NO\n",
     });
     for (const name of authClasses) {
       expect(readFileSync(`apps/ios/Tests/${name}.swift`, "utf8")).toContain(`struct ${name}`);
