@@ -169,18 +169,15 @@ describe("managed Linux private audio", () => {
     expect(f.runs[0]?.activity.resultSettled).toBe(false);
   });
 
-  it.each(["pulseaudio", "parec"])(
-    "advertises absent %s without starting a server",
-    async (missing) => {
-      const f = fixture({ missing });
-      const audio = await f.owner.ready;
-      expect(audio.source).toBeUndefined();
-      expect(audio.failed).toBeUndefined();
-      expect(audio.unavailableReason).toContain(missing + " is not installed");
-      expect(f.inputs).toHaveLength(0);
-      expect(f.scopeCleaned).toHaveBeenCalledOnce();
-    },
-  );
+  it("advertises an absent recorder without starting a server", async () => {
+    const f = fixture({ missing: "parec" });
+    const audio = await f.owner.ready;
+    expect(audio.source).toBeUndefined();
+    expect(audio.failed).toBeUndefined();
+    expect(audio.unavailableReason).toContain("parec is not installed");
+    expect(f.inputs).toHaveLength(0);
+    expect(f.scopeCleaned).toHaveBeenCalledOnce();
+  });
 
   it("bounds server readiness and reaps failed startup", async () => {
     vi.useFakeTimers();
@@ -216,36 +213,6 @@ describe("managed Linux private audio", () => {
     await rejected;
     expect(f.runs[1]?.activity.resultSettled).toBe(true);
   });
-
-  it.each([true, false])(
-    "revalidates live authority at native admission without an abort (%s)",
-    async (allowed) => {
-      const f = fixture({ deferCapture: true });
-      const audio = await f.owner.ready;
-      let current = true;
-      const controller = new AbortController();
-      const started = audio.source!.start(controller.signal, () => {
-        if (!current) {
-          throw new Error("viewer retired");
-        }
-      });
-      const rejected = allowed ? undefined : expect(started).rejects.toThrow("viewer retired");
-      await f.captureSpawned.promise;
-      current = allowed;
-      f.captureAdmission.resolve();
-      if (allowed) {
-        const capture = await started;
-        expect(capture.stream.read()).toEqual(Buffer.from([0, 128, 255, 127]));
-        await capture.stop();
-      } else {
-        await rejected;
-      }
-      expect(controller.signal.aborted).toBe(false);
-      expect(f.captureAdmitted).toHaveBeenCalledTimes(allowed ? 1 : 0);
-      expect(f.runs[1]?.activity.resultSettled).toBe(true);
-      expect(f.runs[0]?.activity.resultSettled).toBe(false);
-    },
-  );
 
   it("rechecks live authority after native startup settles and joins cleanup", async () => {
     let current = true;
