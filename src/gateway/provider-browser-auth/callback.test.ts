@@ -67,44 +67,46 @@ function callback(query: string, method = "GET") {
 }
 
 describe("provider browser sign-in", () => {
-  it.each(["https://gateway.example", "http://localhost:18789", "http://[::1]:18789"])(
-    "receives one bound callback through the Gateway for %s",
-    async (origin) => {
-      const login = startLogin({
-        browserOrigin: { origin, requestHost: new URL(origin).host, isLocalClient: true },
-      });
-      const url = new URL(await login.opened);
-      expect(new URL(url.searchParams.get("callback_url")!).origin).toBe(origin);
-      const hooks = vi.fn(async () => false);
-      await withGatewayServer({
-        prefix: "provider-browser-login",
-        resolvedAuth: AUTH_TOKEN,
-        overrides: { handleHooksRequest: hooks },
-        run: async (server) => {
-          const response = createResponse();
-          await dispatchRequest(
-            server,
-            createRequest({
-              path: `${PROVIDER_OAUTH_CALLBACK_PATH}?state=login-state&code=secret-code`,
-            }),
-            response.res,
-          );
-          expect(response.res.statusCode).toBe(200);
-          expect(response.getBody()).toContain("Sign-in response received");
-          expect(response.getBody()).not.toContain("secret-code");
-          expect(response.getBody()).not.toContain("login-state");
-          expect(response.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
-          expect(response.setHeader).toHaveBeenCalledWith("Referrer-Policy", "no-referrer");
-          expect(hooks).not.toHaveBeenCalled();
-        },
-      });
-      await expect(login.result).resolves.toEqual({ code: "secret-code", state: "login-state" });
-      expect(callback("state=login-state&code=secret-code").res.statusCode).toBe(410);
-      const retained = login.session.authorize;
-      login.session.close();
-      await expect(retained(authorization)).rejects.toThrow("closed");
-    },
-  );
+  it.each([
+    "https://gateway.example",
+    "http://localhost:18789",
+    "http://127.0.0.1:18789",
+    "http://[::1]:18789",
+  ])("receives one bound callback through the Gateway for %s", async (origin) => {
+    const login = startLogin({
+      browserOrigin: { origin, requestHost: new URL(origin).host, isLocalClient: true },
+    });
+    const url = new URL(await login.opened);
+    expect(new URL(url.searchParams.get("callback_url")!).origin).toBe(origin);
+    const hooks = vi.fn(async () => false);
+    await withGatewayServer({
+      prefix: "provider-browser-login",
+      resolvedAuth: AUTH_TOKEN,
+      overrides: { handleHooksRequest: hooks },
+      run: async (server) => {
+        const response = createResponse();
+        await dispatchRequest(
+          server,
+          createRequest({
+            path: `${PROVIDER_OAUTH_CALLBACK_PATH}?state=login-state&code=secret-code`,
+          }),
+          response.res,
+        );
+        expect(response.res.statusCode).toBe(200);
+        expect(response.getBody()).toContain("Sign-in response received");
+        expect(response.getBody()).not.toContain("secret-code");
+        expect(response.getBody()).not.toContain("login-state");
+        expect(response.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+        expect(response.setHeader).toHaveBeenCalledWith("Referrer-Policy", "no-referrer");
+        expect(hooks).not.toHaveBeenCalled();
+      },
+    });
+    await expect(login.result).resolves.toEqual({ code: "secret-code", state: "login-state" });
+    expect(callback("state=login-state&code=secret-code").res.statusCode).toBe(410);
+    const retained = login.session.authorize;
+    login.session.close();
+    await expect(retained(authorization)).rejects.toThrow("closed");
+  });
 
   it("does not consume a pending login for malformed or unrelated responses", async () => {
     const login = startLogin();
@@ -180,6 +182,7 @@ describe("provider browser sign-in", () => {
   it.each([
     { origin: "http://localhost:3000", requestHost: "localhost:18789", isLocalClient: true },
     { origin: "http://localhost:18789", requestHost: "localhost:18789", isLocalClient: false },
+    { origin: "https://other.example", requestHost: "other.example", isLocalClient: true },
     { origin: "http://192.168.1.2:18789", requestHost: "192.168.1.2:18789", isLocalClient: true },
     { origin: "file://localhost", requestHost: "localhost", isLocalClient: true },
   ])("rejects an unserved or unattested browser return ($origin)", async (browserOrigin) => {

@@ -119,6 +119,8 @@ describe("screen-owned desktop audio", () => {
       f.peer.command("stop");
     }
     f.peer.command("start");
+    await flush();
+    expect(f.start).not.toHaveBeenCalled();
     f.observation.activate();
     await flush();
     expect(f.start).toHaveBeenCalledTimes(1);
