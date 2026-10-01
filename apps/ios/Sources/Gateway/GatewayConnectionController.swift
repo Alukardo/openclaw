@@ -993,6 +993,10 @@ extension GatewayConnectionController {
                 else { return false }
                 refreshedConfig.ingressAuthorization = authorization
                 appModel.applyGatewayConnectConfig(refreshedConfig, expectedGeneration: generation)
+            } catch is CancellationError {
+                guard generation == appModel.gatewayConnectGeneration else { return false }
+                appModel.gatewayStatusText = "Offline"
+                return false
             } catch {
                 guard generation == appModel.gatewayConnectGeneration else { return false }
                 let problem = GatewayConnectionProblemMapper.map(error: error) ?? GatewayConnectionProblem(
@@ -1129,6 +1133,16 @@ extension GatewayConnectionController {
             useTLS: defaults.bool(forKey: "gateway.manual.tls"),
             stableID: stableID)
         else { return }
+
+        let registryEntry = GatewaySettingsStore.GatewayRegistryEntry(
+            stableID: stableID,
+            kind: .manual,
+            name: "\(host):\(port)",
+            host: host,
+            port: port,
+            useTLS: route.tls?.required == true,
+            lastConnectedAtMs: nil)
+        guard self.persistActiveGateway(registryEntry) else { return }
 
         let credentials = GatewaySettingsStore.loadGatewayCredentials(
             instanceId: instanceId,
@@ -1325,6 +1339,11 @@ extension GatewayConnectionController {
                 self.scheduleOperatorFleetReconcile()
             } catch {
                 guard isCurrent() else { return }
+                if error is CancellationError {
+                    // The ingress owner retains its sign-in guidance; cancellation is not a network failure.
+                    appModel.gatewayStatusText = "Offline"
+                    return
+                }
                 let problem = GatewayConnectionProblemMapper.map(error: error) ?? GatewayConnectionProblem(
                     kind: .unknown,
                     owner: .network,
