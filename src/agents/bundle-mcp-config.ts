@@ -106,6 +106,17 @@ export function loadMergedBundleMcpConfig(params: {
     cfg: params.cfg,
     manifestRegistry: params.manifestRegistry,
   });
+  return mergeConfiguredBundleMcpServers(bundleMcp, params);
+}
+
+/** Apply the same operator overrides to prepared runtime and account-setup declarations. */
+export function mergeConfiguredBundleMcpServers(
+  bundleMcp: ReturnType<typeof loadEnabledBundleMcpConfig>,
+  params: {
+    cfg?: OpenClawConfig;
+    toolOverrides?: Pick<SessionToolOverrides, "mcpServers">;
+  },
+): MergedBundleMcpConfig {
   const configuredMcp = normalizeConfiguredMcpServers(params.cfg?.mcp?.servers);
   const serverOverrides = params.toolOverrides?.mcpServers;
   const readServerOverride = (name: string) =>
