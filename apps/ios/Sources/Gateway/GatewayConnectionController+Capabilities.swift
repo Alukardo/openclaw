@@ -32,7 +32,6 @@ extension GatewayConnectionController {
 
         var refreshedConfig = cfg
         refreshedConfig.nodeOptions = await self.makeConnectOptions(
-            stableID: cfg.stableID,
             deviceAuthGatewayID: cfg.nodeOptions.deviceAuthGatewayID,
             allowStoredDeviceAuth: cfg.nodeOptions.allowStoredDeviceAuth)
         guard !Task.isCancelled,
@@ -85,13 +84,11 @@ extension GatewayConnectionController {
     }
 
     func makeConnectOptions(
-        stableID: String?,
         deviceAuthGatewayID: String?,
         allowStoredDeviceAuth: Bool = true) async -> GatewayConnectOptions
     {
         let defaults = UserDefaults.standard
         let displayName = self.resolvedDisplayName(defaults: defaults)
-        let resolvedClientId = self.resolvedClientId(defaults: defaults, stableID: stableID)
         let permissions = await self.currentPermissions()
         let caps = self.currentCaps()
 
@@ -101,25 +98,11 @@ extension GatewayConnectionController {
             caps: caps,
             commands: Self.commands(for: caps),
             permissions: permissions,
-            clientId: resolvedClientId,
+            clientId: "openclaw-ios",
             clientMode: "node",
             clientDisplayName: displayName,
             allowStoredDeviceAuth: allowStoredDeviceAuth,
             deviceAuthGatewayID: GatewayStableIdentifier.exact(deviceAuthGatewayID))
-    }
-
-    private func resolvedClientId(defaults: UserDefaults, stableID: String?) -> String {
-        if let stableID,
-           let override = GatewaySettingsStore.loadGatewayClientIdOverride(stableID: stableID)
-        {
-            return override
-        }
-        let manualClientId = defaults.string(forKey: "gateway.manual.clientId")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if manualClientId?.isEmpty == false {
-            return manualClientId!
-        }
-        return "openclaw-ios"
     }
 
     private func resolvedDisplayName(defaults: UserDefaults) -> String {

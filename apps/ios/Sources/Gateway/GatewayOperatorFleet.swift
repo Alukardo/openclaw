@@ -308,7 +308,6 @@ extension GatewayConnectionController {
             instanceId: GatewaySettingsStore.currentInstanceID(),
             gatewayStableID: stableID)
         let nodeOptions = await makeConnectOptions(
-            stableID: stableID,
             deviceAuthGatewayID: GatewaySettingsStore.authenticationOwnerID(routeStableID: stableID),
             allowStoredDeviceAuth: !credentials.suppressStoredDeviceAuth)
         // Endpoint and permission work may outlive Forget's initial invalidation.

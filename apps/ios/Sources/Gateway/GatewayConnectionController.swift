@@ -54,7 +54,7 @@ final class GatewayConnectionController {
     private var localNetworkAccessRequested: Bool
     private(set) var currentScenePhase: ScenePhase = .inactive
     private var didAutoConnect = false
-    private var pendingServiceResolvers: [String: GatewayServiceResolver] = [:]
+    private var pendingServiceResolvers: [String: BonjourServiceResolver<(host: String, port: Int)>] = [:]
     private var pendingTrustConnect: GatewayPendingTrustConnect?
     private var preconnectRetryContext: PreconnectRetryContext?
     private var trustProbeGeneration: UInt64 = 0
@@ -274,23 +274,11 @@ final class GatewayConnectionController {
         if stored == nil {
             guard let url = self.buildGatewayURL(host: target.host, port: target.port, useTLS: true)
             else { return .failed("Failed to build TLS URL for trust verification.") }
-            self.appModel?.beginGatewayPreconnectVerification(
-                stableID: stableID,
-                statusText: "Verifying gateway TLS fingerprint…")
-            guard let probeResult = await self.probeTLSFingerprint(
+            return await self.resolveFirstUseTLS(
                 host: target.host,
                 port: target.port,
-                url: url,
-                queueLabel: "gateway.tls.discovered")
-            else { return .superseded }
-            guard !Task.isCancelled,
-                  self.connectAttemptGeneration == connectAttempt.suppressionLease.generation,
-                  connectAttempt.gatewayGeneration == self.appModel?.gatewayConnectGeneration
-            else { return .superseded }
-            switch probeResult {
-            case let .systemTrusted(fp), let .fingerprint(fp):
-                self.preconnectRetryContext = nil
-                self.pendingTrustConnect = GatewayPendingTrustConnect(
+                gatewayName: gateway.name,
+                pendingConnect: GatewayPendingTrustConnect(
                     url: url,
                     stableID: stableID,
                     isManual: false,
@@ -299,29 +287,7 @@ final class GatewayConnectionController {
                     suppressionLease: connectAttempt.suppressionLease,
                     gatewayGeneration: connectAttempt.gatewayGeneration,
                     admissionCheckpoint: connectAttempt.admissionCheckpoint,
-                    userInitiated: userInitiated)
-                self.pendingTrustPrompt = TrustPrompt(
-                    stableID: stableID,
-                    gatewayName: gateway.name,
-                    host: target.host,
-                    port: target.port,
-                    fingerprintSha256: fp,
-                    isManual: false,
-                    attemptGeneration: connectAttempt.suppressionLease.generation)
-                self.appModel?.gatewayStatusText = "Verify gateway TLS fingerprint"
-                return .accepted
-            case let .failure(failure):
-                let problem = self.tlsProbeFailureProblem(
-                    failure,
-                    host: target.host,
-                    port: target.port)
-                self.appModel?.failGatewayPreconnectVerification(
-                    problem,
-                    stableID: stableID,
-                    host: target.host,
-                    expectedGeneration: connectAttempt.gatewayGeneration)
-                return .failed(problem.localizedMessage)
-            }
+                    userInitiated: userInitiated)) ?? .superseded
         }
 
         let tlsParams = stored.map { fp in
@@ -462,9 +428,10 @@ final class GatewayConnectionController {
                 suppressionLease: connectAttempt.suppressionLease,
                 gatewayGeneration: connectAttempt.gatewayGeneration,
                 admissionCheckpoint: connectAttempt.admissionCheckpoint)
-            if let trustResult = await resolveFirstUseManualTLS(
+            if let trustResult = await self.resolveFirstUseTLS(
                 host: host,
                 port: resolvedPort,
+                gatewayName: "\(host):\(resolvedPort)",
                 pendingConnect: pendingTrustConnect,
                 isSetupCodeOrigin: isSetupCodeOrigin)
             { return trustResult }
@@ -747,7 +714,6 @@ extension GatewayConnectionController {
         GatewaySettingsStore.deleteGatewayCredentials(instanceId: instanceID, stableID: stableID)
         _ = GatewaySettingsStore.clearGatewayCustomHeaders(gatewayStableID: stableID)
         _ = GatewayTLSStore.clearFingerprint(stableID: stableID)
-        GatewaySettingsStore.saveGatewayClientIdOverride(stableID: stableID, clientId: nil)
         GatewaySettingsStore.saveGatewaySelectedAgentId(stableID: stableID, agentId: nil)
         let shareRelayGatewayID = ShareGatewayRelaySettings.loadConfig()?.gatewayStableID
         if GatewayStableIdentifier.matches(shareRelayGatewayID, stableID) {
@@ -1308,7 +1274,6 @@ extension GatewayConnectionController {
                     guard isCurrent() else { return }
                 }
                 let nodeOptions = await self.makeConnectOptions(
-                    stableID: gatewayStableID,
                     deviceAuthGatewayID: GatewaySettingsStore.authenticationOwnerID(routeStableID: gatewayStableID),
                     allowStoredDeviceAuth: allowStoredDeviceAuth)
                 // Permission reads above can suspend long enough for a model-owned reconnect reset
@@ -1384,11 +1349,12 @@ extension GatewayConnectionController {
         return result
     }
 
-    private func resolveFirstUseManualTLS(
+    private func resolveFirstUseTLS(
         host: String,
         port: Int,
+        gatewayName: String,
         pendingConnect: GatewayPendingTrustConnect,
-        isSetupCodeOrigin: Bool) async
+        isSetupCodeOrigin: Bool = false) async
         -> ConnectionAttemptResult?
     {
         self.appModel?.beginGatewayPreconnectVerification(
@@ -1398,7 +1364,7 @@ extension GatewayConnectionController {
             host: host,
             port: port,
             url: pendingConnect.url,
-            queueLabel: "gateway.tls.manual")
+            queueLabel: pendingConnect.isManual ? "gateway.tls.manual" : "gateway.tls.discovered")
         else { return .superseded }
         guard !Task.isCancelled,
               self.connectAttemptGeneration == pendingConnect.suppressionLease.generation,
@@ -1411,11 +1377,11 @@ extension GatewayConnectionController {
             self.pendingTrustConnect = pendingConnect
             self.pendingTrustPrompt = TrustPrompt(
                 stableID: pendingConnect.stableID,
-                gatewayName: "\(host):\(port)",
+                gatewayName: gatewayName,
                 host: host,
                 port: port,
                 fingerprintSha256: fp,
-                isManual: true,
+                isManual: pendingConnect.isManual,
                 attemptGeneration: pendingConnect.suppressionLease.generation)
             self.appModel?.gatewayStatusText = "Verify gateway TLS fingerprint"
             return .accepted
@@ -1520,12 +1486,21 @@ extension GatewayConnectionController {
         guard case let .service(name, type, domain, _) = endpoint else { return nil }
         let key = "\(domain)|\(type)|\(name)"
         return await withCheckedContinuation { continuation in
-            let resolver = GatewayServiceResolver(name: name, type: type, domain: domain) { [weak self] result in
-                Task { @MainActor in
-                    self?.pendingServiceResolvers[key] = nil
-                    continuation.resume(returning: result)
-                }
-            }
+            let resolver = BonjourServiceResolver(
+                name: name,
+                type: type,
+                domain: domain,
+                resolve: { service -> (host: String, port: Int)? in
+                    guard let host = BonjourServiceResolverSupport.normalizeHost(service.hostName),
+                          !host.isEmpty, service.port > 0 else { return nil }
+                    return (host: host, port: service.port)
+                },
+                completion: { [weak self] result in
+                    Task { @MainActor in
+                        self?.pendingServiceResolvers[key] = nil
+                        continuation.resume(returning: result)
+                    }
+                })
             self.pendingServiceResolvers[key] = resolver
             resolver.start()
         }

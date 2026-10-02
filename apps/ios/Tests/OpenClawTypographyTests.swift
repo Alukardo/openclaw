@@ -32,11 +32,12 @@ struct OpenClawTypographyTests {
         #expect(dashboard.contains(".font(OpenClawType.body)"))
     }
 
-    @Test func `file attachment controls use branded typography`() throws {
+    @Test(arguments: ["ChatFileAttachment.swift", "ChatMessageReactions.swift"])
+    func `chat accessory controls use branded typography`(filename: String) throws {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("shared/OpenClawKit/Sources/OpenClawChatUI/ChatFileAttachment.swift"),
+                .appendingPathComponent("shared/OpenClawKit/Sources/OpenClawChatUI/\(filename)"),
             encoding: .utf8)
         #expect(source.contains(".font(OpenClawChatTypography.footnote)"))
         #expect(source.contains(".font(OpenClawChatTypography.caption)"))
@@ -66,8 +67,7 @@ struct OpenClawTypographyTests {
         #expect(support.contains("Label(\"Delete…\""))
         #expect(support.contains(".font(OpenClawType.subhead)"))
         #expect(support.contains(".font(OpenClawType.subheadSemiBold)"))
-        #expect(commandCenter.contains("Toggle(isOn: self.$showArchived)"))
-        #expect(commandCenter.contains("Text(\"Show Archived\")"))
+        #expect(!commandCenter.contains(".font(."))
         #expect(commandCenter.contains(".font(OpenClawType.captionMedium)"))
     }
 
