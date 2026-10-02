@@ -3300,7 +3300,10 @@ final class TalkModeManager: NSObject {
             try self.startRecognition()
         } catch {
             self.logger.warning(
-                "startRecognition during \(context, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                """
+                startRecognition during \(context, privacy: .public) failed: \
+                \(error.localizedDescription, privacy: .public)
+                """)
         }
     }
 
