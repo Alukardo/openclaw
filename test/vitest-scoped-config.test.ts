@@ -69,7 +69,7 @@ function expectForkedNonIsolatedRunner(
 }
 
 describe("createScopedVitestConfig", () => {
-  it("keeps broad package scoped cli directory filters aligned with repo-root include patterns", () => {
+  it("narrows package CLI directories within their owner", () => {
     const config = createScopedVitestConfig(["packages/**/*.test.ts"], {
       argv: ["vitest", "run", "packages/normalization-core"],
       dir: "packages",
@@ -77,7 +77,7 @@ describe("createScopedVitestConfig", () => {
       passWithNoTests: true,
     });
 
-    expect(requireTestConfig(config).include).toEqual(["**/*.test.ts"]);
+    expect(requireTestConfig(config).include).toEqual(["normalization-core/**/*.test.ts"]);
   });
 
   it("relativizes scoped include and exclude patterns to the configured dir", () => {
@@ -317,6 +317,9 @@ describe("scoped vitest configs", () => {
 
   it("keeps infra and database worker consumers rooted at the repository", () => {
     const testConfig = requireTestConfig(defaultInfraConfig);
+    expect(testConfig.pool).toBe(diagnosticForksPool);
+    expect(testConfig.isolate).toBe(true);
+    expect(testConfig.runner).toBeUndefined();
     expect(testConfig.dir).toBe(process.cwd());
     expect(testConfig.include).toEqual(["src/infra/**/*.test.ts", ...databaseWorkerCoreTestFiles]);
     const recoveryFile = "src/wizard/setup.inference-recovery.integration.test.ts";
@@ -482,8 +485,27 @@ describe("scoped vitest configs", () => {
           `--import=${new URL("./vitest/vitest.jsdom-preload.mts", import.meta.url).href}`,
         ],
       },
-      { name: "plugins-native-loader", pool: "forks", execArgv: [] },
+      {
+        name: "plugins-native-loader",
+        pool: "forks",
+        execArgv: process.versions.bun ? ["--no-install"] : [],
+      },
     ]);
+    for (const file of [
+      "loader.lazy-alias.test.ts",
+      "plugin-module-loader-cache.source-prescan.test.ts",
+      "plugin-sdk-native-resolver.test.ts",
+    ]) {
+      expect(
+        projects
+          .filter(
+            (project) =>
+              project.include.some((pattern) => minimatch(file, pattern)) &&
+              !project.exclude.some((pattern) => minimatch(file, pattern)),
+          )
+          .map((project) => project.name),
+      ).toEqual(["plugins-native-loader"]);
+    }
   });
 
   it("normalizes ui include patterns relative to the scoped dir", () => {
