@@ -2,7 +2,7 @@ import type { BundledStaticCatalogState } from "../agents/embedded-agent-runner/
 import type { BundledChannelCatalogEntry } from "../channels/bundled-channel-catalog.types.js";
 import type { ManifestChannelPlugin } from "../channels/plugins/manifest-channel-plugin.types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { loadEnabledBundleMcpConfig } from "./bundle-mcp.js";
+import type { EnabledBundleMcpConfigResult } from "./bundle-mcp.types.js";
 import type { PluginCandidate, PluginDiscoveryResult } from "./discovery.types.js";
 import type {
   InstalledPluginIndex,
@@ -15,7 +15,7 @@ import type { BundledProviderPolicySurface } from "./provider-policy-surface.typ
 
 export type PluginMcpAuthDeclarations = {
   byPluginId: ReadonlyMap<string, readonly { serverName: string; url: string }[]>;
-  bundled: ReturnType<typeof loadEnabledBundleMcpConfig>;
+  bundled: EnabledBundleMcpConfigResult;
 };
 
 export type ProviderPolicyOwnerIndex = {
