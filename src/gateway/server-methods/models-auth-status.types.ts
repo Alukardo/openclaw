@@ -1,4 +1,4 @@
-import type { AuthProviderHealth } from "../../agents/auth-health.js";
+import type { AuthProviderHealth, AuthProviderHealthStatus } from "../../agents/auth-health.js";
 import type { ProviderUsageSnapshot } from "../../infra/provider-usage.types.js";
 
 /** Time-bounded credential expiry projected to gateway clients. */
@@ -29,7 +29,7 @@ export type ModelAuthStatusProvider = {
   /** Canonical credential owner used for profile ordering mutations. */
   authProvider?: string;
   displayName: string;
-  status: AuthProviderHealth["status"];
+  status: AuthProviderHealthStatus;
   expiry?: ModelAuthExpiry;
   profiles: ModelAuthStatusProfile[];
   /** Explicit stored/config priority. Omitted when selection is automatic. */
