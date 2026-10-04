@@ -476,24 +476,20 @@ private func waitForObservedState(_ condition: @escaping @MainActor () -> Bool) 
     }
 }
 
-private func sendUserMessage(_ vm: OpenClawChatViewModel, text: String = "hi") async {
+@discardableResult
+private func sendUserMessage(_ vm: OpenClawChatViewModel, text: String = "hi") async -> Task<Void, Never>? {
     await MainActor.run {
         vm.input = text
-        vm.send()
+        return vm.send()
     }
 }
 
 private func waitForLastSentRunId(_ transport: TestChatTransport) async throws -> String {
-    try await waitUntil("transport send called") {
-        await transport.lastSentRunId() != nil
-    }
-    return try #require(await transport.lastSentRunId())
+    try await waitForSentRunId(after: 0, transport)
 }
 
 private func waitForSentRunId(after sentRunCount: Int, _ transport: TestChatTransport) async throws -> String {
-    try await waitUntil("transport send called") {
-        await transport.sentRunIds().count > sentRunCount
-    }
+    await transport.waitForState { $0.sentRunIds.count > sentRunCount }
     return try #require(await transport.sentRunIds().last)
 }
 
@@ -505,12 +501,13 @@ private func sendMessageAndEmitFinal(
     sessionKey: String = "main") async throws -> String
 {
     let sentRunCount = await transport.sentRunIds().count
-    await sendUserMessage(vm, text: text)
-    let runId = try await waitForSentRunId(after: sentRunCount, transport)
-    try await waitUntil("send is pending or refreshed") {
-        await MainActor.run {
-            vm.pendingRunCount == 1 || (!vm.isSending && vm.pendingRunCount == 0)
-        }
+    let send = try #require(await sendUserMessage(vm, text: text))
+    await send.value
+    let sentRunIds = await transport.sentRunIds()
+    try #require(sentRunIds.count > sentRunCount)
+    let runId = try #require(sentRunIds.last)
+    await MainActor.run {
+        #expect(vm.pendingRunCount == 1 || (!vm.isSending && vm.pendingRunCount == 0))
     }
 
     transport.emit(
@@ -640,8 +637,34 @@ private actor AsyncGate {
     }
 }
 
+/// Deadline-free waits over recorded test state: each waiter resumes on the first change that satisfies it.
+private struct StateWaiters {
+    private typealias Waiter = (isSatisfied: () -> Bool, continuation: CheckedContinuation<Void, Never>)
+    private var waiters: [Waiter] = []
+
+    mutating func append(_ continuation: CheckedContinuation<Void, Never>, until isSatisfied: @escaping () -> Bool) {
+        self.waiters.append((isSatisfied, continuation))
+    }
+
+    mutating func resumeSatisfied() {
+        var pending: [Waiter] = []
+        for waiter in self.waiters {
+            if waiter.isSatisfied() {
+                waiter.continuation.resume()
+            } else {
+                pending.append(waiter)
+            }
+        }
+        self.waiters = pending
+    }
+}
+
 private actor AsyncCounter {
-    private var value: Int
+    private var value: Int {
+        didSet { self.waiters.resumeSatisfied() }
+    }
+
+    private var waiters = StateWaiters()
 
     init(_ initialValue: Int = 0) {
         self.value = initialValue
@@ -655,10 +678,21 @@ private actor AsyncCounter {
     func current() -> Int {
         self.value
     }
+
+    func wait(until isSatisfied: @escaping @Sendable (Int) -> Bool) async {
+        guard !isSatisfied(self.value) else { return }
+        await withCheckedContinuation { continuation in
+            self.waiters.append(continuation) { isSatisfied(self.value) }
+        }
+    }
 }
 
 private actor AsyncStringRecorder {
-    private var values: [String] = []
+    private var values: [String] = [] {
+        didSet { self.waiters.resumeSatisfied() }
+    }
+
+    private var waiters = StateWaiters()
 
     func append(_ value: String) {
         self.values.append(value)
@@ -666,6 +700,13 @@ private actor AsyncStringRecorder {
 
     func current() -> [String] {
         self.values
+    }
+
+    func wait(until isSatisfied: @escaping @Sendable ([String]) -> Bool) async {
+        guard !isSatisfied(self.values) else { return }
+        await withCheckedContinuation { continuation in
+            self.waiters.append(continuation) { isSatisfied(self.values) }
+        }
     }
 }
 
@@ -722,38 +763,52 @@ struct TestSessionListQuery: Equatable, Sendable {
 }
 
 private actor TestChatTransportState {
-    var historyCallCount: Int = 0
-    var sessionsCallCount: Int = 0
-    var modelsCallCount: Int = 0
-    var modelAgentIDs: [String?] = []
-    var commandsCallCount: Int = 0
-    var healthCallCount: Int = 0
-    var activeSessionKeys: [String] = []
-    var createdSessionKeys: [String] = []
-    var createdParentSessionKeys: [String?] = []
-    var resetSessionKeys: [String] = []
-    var compactSessionKeys: [String] = []
-    var sentSessionKeys: [String] = []
-    var sentAgentIDs: [String?] = []
-    var sentRoutingContracts: [String?] = []
-    var sentSettingsExpectations: [OpenClawChatSessionSettingsExpectation?] = []
-    var sentMessages: [String] = []
-    var sentRunIds: [String] = []
-    var commandSessionKeys: [String] = []
-    var sentThinkingLevels: [String] = []
-    var abortedRunIds: [String] = []
-    var waitCompletionRunIds: [String] = []
-    var patchedModels: [String?] = []
-    var patchedModelTargets: [(sessionKey: String, agentID: String?)] = []
-    var patchedThinkingLevels: [String] = []
-    var sessionSettingsPatches: [OpenClawChatSessionSettingsPatch] = []
-    var sessionSettingsTargets: [(sessionKey: String, agentID: String?)] = []
-    var listSessionsQueries: [TestSessionListQuery] = []
-    var renamedLabelsByKey: [(key: String, label: String)] = []
-    var pinnedChanges: [(key: String, pinned: Bool)] = []
-    var archivedChanges: [(key: String, expectedSessionID: String?, archived: Bool)] = []
-    var sessionSettingsRouteGeneration: UInt64 = 0
-    var capturedSessionSettingsRouteGenerations: [UInt64] = []
+    var historyCallCount: Int = 0 { didSet { self.wake() } }
+    var sessionsCallCount: Int = 0 { didSet { self.wake() } }
+    var modelsCallCount: Int = 0 { didSet { self.wake() } }
+    var modelAgentIDs: [String?] = [] { didSet { self.wake() } }
+    var commandsCallCount: Int = 0 { didSet { self.wake() } }
+    var healthCallCount: Int = 0 { didSet { self.wake() } }
+    var activeSessionKeys: [String] = [] { didSet { self.wake() } }
+    var createdSessionKeys: [String] = [] { didSet { self.wake() } }
+    var createdParentSessionKeys: [String?] = [] { didSet { self.wake() } }
+    var resetSessionKeys: [String] = [] { didSet { self.wake() } }
+    var compactSessionKeys: [String] = [] { didSet { self.wake() } }
+    var sentSessionKeys: [String] = [] { didSet { self.wake() } }
+    var sentAgentIDs: [String?] = [] { didSet { self.wake() } }
+    var sentRoutingContracts: [String?] = [] { didSet { self.wake() } }
+    var sentSettingsExpectations: [OpenClawChatSessionSettingsExpectation?] = [] { didSet { self.wake() } }
+    var sentMessages: [String] = [] { didSet { self.wake() } }
+    var sentRunIds: [String] = [] { didSet { self.wake() } }
+    var commandSessionKeys: [String] = [] { didSet { self.wake() } }
+    var sentThinkingLevels: [String] = [] { didSet { self.wake() } }
+    var abortedRunIds: [String] = [] { didSet { self.wake() } }
+    var waitCompletionRunIds: [String] = [] { didSet { self.wake() } }
+    var patchedModels: [String?] = [] { didSet { self.wake() } }
+    var patchedModelTargets: [(sessionKey: String, agentID: String?)] = [] { didSet { self.wake() } }
+    var patchedThinkingLevels: [String] = [] { didSet { self.wake() } }
+    var sessionSettingsPatches: [OpenClawChatSessionSettingsPatch] = [] { didSet { self.wake() } }
+    var sessionSettingsTargets: [(sessionKey: String, agentID: String?)] = [] { didSet { self.wake() } }
+    var listSessionsQueries: [TestSessionListQuery] = [] { didSet { self.wake() } }
+    var renamedLabelsByKey: [(key: String, label: String)] = [] { didSet { self.wake() } }
+    var pinnedChanges: [(key: String, pinned: Bool)] = [] { didSet { self.wake() } }
+    var archivedChanges: [(key: String, expectedSessionID: String?, archived: Bool)] = [] { didSet { self.wake() } }
+    var sessionSettingsRouteGeneration: UInt64 = 0 { didSet { self.wake() } }
+    var capturedSessionSettingsRouteGenerations: [UInt64] = [] { didSet { self.wake() } }
+
+    private var waiters = StateWaiters()
+
+    /// Resumes once the recorded transport state satisfies `isSatisfied`, without a wall-clock deadline.
+    func wait(until isSatisfied: @escaping @Sendable (isolated TestChatTransportState) -> Bool) async {
+        guard !isSatisfied(self) else { return }
+        await withCheckedContinuation { continuation in
+            self.waiters.append(continuation) { isSatisfied(self) }
+        }
+    }
+
+    private func wake() {
+        self.waiters.resumeSatisfied()
+    }
 }
 
 private final class TestChatTransport: @unchecked Sendable, OpenClawChatTransport {
@@ -1282,6 +1337,10 @@ private final class TestChatTransport: @unchecked Sendable, OpenClawChatTranspor
 
     func emit(_ evt: OpenClawChatTransportEvent) {
         self.continuation.yield(evt)
+    }
+
+    func waitForState(_ isSatisfied: @escaping @Sendable (isolated TestChatTransportState) -> Bool) async {
+        await self.state.wait(until: isSatisfied)
     }
 
     func lastSentRunId() async -> String? {

@@ -40,8 +40,9 @@ extension OpenClawChatViewModel {
             fallbackGeneration: runOwnershipGeneration)
     }
 
-    public func send() {
-        guard !self.usesWebConversation else { return }
+    @discardableResult
+    public func send() -> Task<Void, Never>? {
+        guard !self.usesWebConversation else { return nil }
         logDiagnostic(
             "chat.ui send invoked sessionKey=\(sessionKey) "
                 + "inputLen=\(input.count) attachments=\(attachments.count) "
@@ -49,14 +50,13 @@ extension OpenClawChatViewModel {
                 + "health=\(healthOK)")
         // Reserve the accepted draft before scheduling work so initial route
         // hydration cannot retire its owner before asynchronous validation starts.
-        guard let draft = captureSendDraft() else { return }
+        guard let draft = captureSendDraft() else { return nil }
         isSubmittingDraft = true
-        Task { await self.performSend(draft) }
+        return Task { await self.performSend(draft) }
     }
 
     public func loadSlashCommandsIfNeeded() {
-        guard transport.supportsSlashCommandCatalog else { return }
-        guard !hasLoadedSlashCommands, !isLoadingSlashCommands else { return }
+        guard transport.supportsSlashCommandCatalog, !hasLoadedSlashCommands, !isLoadingSlashCommands else { return }
         Task { await self.loadSlashCommands(force: false) }
     }
 
