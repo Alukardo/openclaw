@@ -25,12 +25,12 @@ export function createChatReplySessionReader(session: ChatReplySession) {
       }),
   };
   return {
-    notePreparedSession(binding: ReplySessionBinding) {
+    notePreparedSession(this: void, binding: ReplySessionBinding) {
       if (binding.sessionKey === session.sessionKey) {
         preparedSession = { ...binding };
       }
     },
-    captureTranscriptStart() {
+    captureTranscriptStart(this: void) {
       const { sessionId, lifecycleRevision, storePath } = preparedSession;
       const watermark = sessionId
         ? readSessionTranscriptWatermark({
@@ -47,7 +47,7 @@ export function createChatReplySessionReader(session: ChatReplySession) {
         afterSeq: watermark.maxSeq ?? 0,
       };
     },
-    async readCurrentSession(key = session.sessionKey, agentId = session.agentId) {
+    async readCurrentSession(this: void, key = session.sessionKey, agentId = session.agentId) {
       const cfg = getRuntimeConfig();
       const assertRoutingCurrent = captureSessionMutationRouting(cfg);
       return await loadGatewaySessionEntryReadOnlyInWorker({

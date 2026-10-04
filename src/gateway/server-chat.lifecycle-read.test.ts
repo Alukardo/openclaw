@@ -76,7 +76,7 @@ it("reads lifecycle recovery in workers and retains tool/text order through clos
       closing = h.handler.dispose().then(() => {
         closed = true;
       });
-      h.handler({
+      const refused = h.handler({
         ...event("start"),
         runId: "late-new-run",
         stream: "assistant",
@@ -84,7 +84,7 @@ it("reads lifecycle recovery in workers and retains tool/text order through clos
       });
       expect(closed).toBe(false);
       release.resolve();
-      await Promise.all([starting, tool, text, terminal, closing]);
+      await Promise.all([starting, tool, text, terminal, closing, refused]);
       expect(sql.queries).toEqual([]);
       expect(h.agent().map(([, payload]) => payload.seq)).toEqual([1, 3, 4]);
       expect(h.targetedAgent().map(([, payload]) => payload.seq)).toEqual([2]);

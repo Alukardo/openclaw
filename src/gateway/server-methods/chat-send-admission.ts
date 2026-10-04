@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
-import { readAcpSessionMetaForEntries } from "../../acp/runtime/session-meta-readonly.js";
 import {
   createAgentRunRestartAbortError,
   isAgentRunDirectAbortReason,
@@ -59,11 +58,7 @@ import {
 } from "./chat-send-pre-admission.js";
 import { bindChatSendPreparedSession } from "./chat-send-session-binding.js";
 import { captureAdmittedChatSendSessionSettings } from "./chat-send-session-settings.js";
-import {
-  loadCurrentChatSendSession,
-  prepareChatSendSessionEntry,
-  type PreparedChatSendSession,
-} from "./chat-send-session.js";
+import { prepareChatSendSessionEntry, type PreparedChatSendSession } from "./chat-send-session.js";
 import {
   admitChatSendUploads,
   assertChatSendExclusiveAdmission,
@@ -72,6 +67,7 @@ import {
   prepareChatSendAdmissionRetry,
   prepareCurrentChatSendRetry,
   releaseChatSendCallerAuthority,
+  revalidateChatSendRestartAdmission,
   respondChatSendWorkAdmissionFailure,
 } from "./chat-send-work-admission.js";
 import type { GatewayRequestHandlerOptions } from "./types.js";
@@ -426,18 +422,8 @@ export async function admitChatSend(
         assertSessionTargetCurrent();
         assertChatSendExclusiveAdmission(request, session);
       },
-      revalidateAllowed: async () => {
-        if (!restartSafeRequest) {
-          return commitChatWorkAdmission(null);
-        }
-        const latest = await loadCurrentChatSendSession(session);
-        const [acpMeta] = await readAcpSessionMetaForEntries({
-          cfg: latest.cfg,
-          entries: [{ agentId, sessionKey: latest.canonicalKey, entry: latest.entry }],
-        });
-        // The writer barrier retains the selected row; commit rechecks request and run authority.
-        return commitChatWorkAdmission(acpMeta ?? null);
-      },
+      revalidateAllowed: () =>
+        revalidateChatSendRestartAdmission(restartSafeRequest, session, commitChatWorkAdmission),
       onInterrupt: (reason) => {
         const stopReason = isAgentRunDirectAbortReason(reason) ? "rpc" : "restart";
         if (!admittedRunAbort) {

@@ -129,8 +129,8 @@ it.for(["lifecycle", "logical source"] as const)(
           .mockImplementation((params) => {
             const admission = beginAdmission({
               ...params,
-              assertAllowed: async (signal) => {
-                await params.assertAllowed(signal);
+              assertAllowed: async (admissionSignal) => {
+                await params.assertAllowed(admissionSignal);
                 firstRead.resolve();
               },
             });

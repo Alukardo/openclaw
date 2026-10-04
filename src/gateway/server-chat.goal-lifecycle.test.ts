@@ -135,7 +135,7 @@ describe("agent event goal lifecycle", () => {
         sessionEventSubscribers.subscribe("conn-session");
         registerAgentRunContext("run-terminal-final-failure", { sessionKey });
 
-        emitAgentEvents(handler, "run-terminal-final-failure", [
+        await emitAgentEvents(handler, "run-terminal-final-failure", [
           ["lifecycle", { phase: "error", error: "Retryable provider failure." }],
           [
             "tool",
@@ -144,7 +144,7 @@ describe("agent event goal lifecycle", () => {
         ]);
         expect(read()?.goal?.status).toBe("active");
         expect(persistGatewaySessionLifecycleEventMock).not.toHaveBeenCalled();
-        emitAgentEvents(handler, "run-terminal-final-failure", [
+        await emitAgentEvents(handler, "run-terminal-final-failure", [
           ["lifecycle", { phase: "error", startedAt: 1_000, endedAt: 2_000, ...terminal }],
         ]);
         await Promise.all(
@@ -168,7 +168,7 @@ describe("agent event goal lifecycle", () => {
         ).toMatchObject({ status, lastRunError: terminal.error, session: { goal: stoppedGoal } });
 
         vi.setSystemTime(3_000);
-        emitAgentEvents(handler, "run-recovered", [
+        await emitAgentEvents(handler, "run-recovered", [
           ["lifecycle", { phase: "start", startedAt: 3_000 }],
           ["lifecycle", { phase: "end", startedAt: 3_000, endedAt: 4_000 }],
         ]);
@@ -185,7 +185,7 @@ describe("agent event goal lifecycle", () => {
             .map(([, payload]) => payload.state),
         ).toEqual(["error", "final"]);
       } finally {
-        handler.dispose();
+        await handler.dispose();
         vi.useRealTimers();
       }
     }),

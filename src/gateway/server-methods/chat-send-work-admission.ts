@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
+import { readAcpSessionMetaForEntries } from "../../acp/runtime/session-meta-readonly.js";
 import { hasPendingFollowupQueueWork } from "../../auto-reply/reply/queue/state.js";
 import { replyRunRegistry } from "../../auto-reply/reply/reply-run-registry.js";
 import type { SessionTranscriptTurnMutation } from "../../config/sessions/goals-operations.types.js";
@@ -31,6 +32,23 @@ import type { NormalizedChatSendRequest } from "./chat-send-request.js";
 import type { ChatSendRetryComparison } from "./chat-send-retry-comparison.js";
 import { loadCurrentChatSendSession, type PreparedChatSendSession } from "./chat-send-session.js";
 import type { GatewayRequestContext, GatewayRequestHandlerOptions } from "./types.js";
+
+export async function revalidateChatSendRestartAdmission(
+  restartSafeRequest: PreparedChatSendSession["restartSafeRequest"],
+  session: PreparedChatSendSession,
+  commit: (acpMeta: SessionEntry["acp"] | null) => Promise<void>,
+): Promise<void> {
+  if (!restartSafeRequest) {
+    return commit(null);
+  }
+  const latest = await loadCurrentChatSendSession(session);
+  const [acpMeta] = await readAcpSessionMetaForEntries({
+    cfg: latest.cfg,
+    entries: [{ agentId: session.agentId, sessionKey: latest.canonicalKey, entry: latest.entry }],
+  });
+  // The writer barrier retains the selected row; commit rechecks request and run authority.
+  return commit(acpMeta ?? null);
+}
 
 /** Preparation returns facts; the caller consumes current retry ownership before reserving. */
 export function prepareChatSendAdmissionRetry(params: ChatSendPreAdmissionParams) {

@@ -13,7 +13,7 @@ import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js"
 import { resolveEffectiveAgentRuntime } from "../../agents/thinking-runtime.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { resolveTextCommand } from "../../auto-reply/commands-registry.js";
-import { getRuntimeConfig } from "../../config/io.js";
+import { getRuntimeConfig as getCurrentRuntimeConfig } from "../../config/io.js";
 import {
   resolveAgentMainSessionKey,
   resolveSessionRoutingContract,
@@ -277,7 +277,7 @@ export function qualifyChatSendSession(loaded: LoadedChatSendSession): PreparedC
 /** Admission reloads once, retaining the original physical choice and logical identity. */
 export async function loadCurrentChatSendSession(session: PreparedChatSendSession) {
   session.assertSessionTargetCurrent();
-  const cfg = getRuntimeConfig();
+  const cfg = getCurrentRuntimeConfig();
   const assertRoutingCurrent = captureSessionMutationRouting(cfg);
   const latest = await loadGatewaySessionEntryReadOnlyInWorker({
     cfg,
@@ -286,10 +286,10 @@ export async function loadCurrentChatSendSession(session: PreparedChatSendSessio
     ...session.sessionLoadOptions,
     assertActive: () => {
       session.assertSessionTargetCurrent();
-      assertRoutingCurrent(getRuntimeConfig());
+      assertRoutingCurrent(getCurrentRuntimeConfig());
     },
   });
-  if (session.sessionRoutingChanged(getRuntimeConfig())) {
+  if (session.sessionRoutingChanged(getCurrentRuntimeConfig())) {
     throw new Error(SESSION_ROUTING_CHANGED_ERROR_REASON);
   }
   if (

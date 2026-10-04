@@ -750,7 +750,7 @@ describe("startGatewayEventSubscriptions", () => {
               if (dispatchFails) {
                 throw dispatchFailure;
               }
-              handler(event);
+              await handler(event);
             } finally {
               dispatchFinished.resolve();
             }
