@@ -25,7 +25,7 @@ import { createCronStoreHarness, createNoopLogger } from "../../cron/service.tes
 import { loadCronStore, saveCronStore } from "../../cron/store.js";
 import { cronStoreKey } from "../../cron/store/key.js";
 import type { CronRunRecord } from "../../cron/store/run-history.types.js";
-import type { CronDelivery, CronJob } from "../../cron/types.js";
+import type { CronJob } from "../../cron/types.js";
 import {
   claimAgentRunDelegatedAuthority,
   releaseAgentRunDelegatedAuthority,
@@ -55,6 +55,7 @@ import {
   pluginEntries,
   telegramConfig,
   telegramSlackConfig,
+  telegramDeliveryWithSlackFailure,
   telegramDisabledAccountConfig,
   msteamsConfig,
   slackSynologyConfig,
@@ -184,21 +185,6 @@ function callerClientWithCronCreatorAuthority(grant: CronCreatorAuthorityGrant):
   client.internal!.agentRuntimeIdentity!.cronToolsAllowCapture = "final-executable-surface";
   client.internal!.agentRuntimeIdentity!.cronCreatorAuthorityGrant = grant;
   return client;
-}
-
-function telegramDeliveryWithSlackFailure(overrides: Partial<CronDelivery> = {}): CronDelivery {
-  return {
-    mode: "announce",
-    channel: "telegram",
-    to: "telegram:123",
-    failureDestination: {
-      mode: "announce",
-      channel: "slack",
-      to: "C123",
-      accountId: "bot-b",
-    },
-    ...overrides,
-  };
 }
 
 function setRuntimeConfig(config: OpenClawConfig): void {
@@ -1254,6 +1240,7 @@ describe("cron method validation", () => {
     loadGatewaySessionEntry.mockReturnValueOnce({ canonicalKey: sessionKey, entry });
     const { context, respond } = await invokeWake({ mode: "now", text: "ping", sessionKey });
     expect(context.cron.wake).toHaveBeenCalledWith({
+      commitGuard: expect.any(Function),
       agentId: "main",
       mode: "now",
       text: "ping",
@@ -3953,6 +3940,7 @@ describe("cron method validation", () => {
         sessionKey: "agent:main:telegram:dm:42",
       });
       expect(context.cron.wake).toHaveBeenCalledWith({
+        commitGuard: expect.any(Function),
         agentId: "main",
         mode: "now",
         text: "ping",
@@ -4010,7 +3998,10 @@ describe("cron method validation", () => {
         params,
         caller ? callerClient(caller) : undefined,
       );
-      expect(context.cron.wake).toHaveBeenCalledWith(expected);
+      expect(context.cron.wake).toHaveBeenCalledWith({
+        ...expected,
+        commitGuard: expect.any(Function),
+      });
       expect(respond).toHaveBeenCalledWith(true, { ok: true }, undefined);
     });
 
