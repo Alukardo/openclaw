@@ -8,7 +8,7 @@ import type { ChatRunRegistration, ChatRunState } from "./server-chat-state.js";
 import type { GatewayRequestContext, RespondFn } from "./server-methods/shared-types.js";
 import { agentDiscoveryMock } from "./test-helpers.runtime-state.js";
 
-type AgentEventHandler = (event: AgentEventPayload) => void;
+type AgentEventHandler = (event: AgentEventPayload) => void | Promise<void>;
 
 type AgentEventOverrideKey =
   | "agentId"
@@ -40,7 +40,7 @@ export function emitAgentEvent(
   data: Record<string, unknown>,
   overrides: AgentEventOverrides = {},
 ) {
-  handler({ runId, seq: 1, stream, ts: Date.now(), data, ...overrides });
+  return handler({ runId, seq: 1, stream, ts: Date.now(), data, ...overrides });
 }
 
 export function emitAgentEvents(

@@ -8,8 +8,9 @@ import {
 const persistLifecycle = vi.hoisted(() => vi.fn());
 const ownerStatus = vi.hoisted(() => vi.fn());
 
+// mock-isolation: Hold persistence settlement without opening a database.
 vi.mock("./session-lifecycle-state.js", () => ({
-  persistGatewaySessionLifecycleEvent: persistLifecycle,
+  prepareGatewaySessionLifecycleEvent: (params: unknown) => () => persistLifecycle(params),
 }));
 vi.mock("../infra/agent-run-registry.js", () => ({
   getAgentRunContextOwnerStatus: ownerStatus,
@@ -76,9 +77,9 @@ describe("session lifecycle persistence owner", () => {
     const successorPrepared = owner.observe(successor);
 
     expect(successorPrepared).not.toBe(firstPrepared);
-    expect(persistLifecycle).toHaveBeenCalledTimes(2);
     expect(owner.persist(successor)).toBe(successorPrepared);
     await Promise.all([firstPrepared, successorPrepared]);
+    expect(persistLifecycle).toHaveBeenCalledTimes(2);
     await owner.drain();
   });
 
@@ -148,6 +149,29 @@ describe("session lifecycle persistence owner", () => {
     deferred.resolve();
     await drain;
     expect(drained).toBe(true);
+  });
+
+  it("settles a start before a following terminal while shutdown drains both", async () => {
+    const releaseStart = createDeferred();
+    const phases: unknown[] = [];
+    persistLifecycle.mockImplementation(async (params: PersistenceParams) => {
+      if (params.event.data?.phase === "start") {
+        await releaseStart.promise;
+      }
+      phases.push(params.event.data?.phase);
+    });
+    const { owner, scheduler } = fixture();
+    const start = owner.persist({
+      ...terminal,
+      event: { ...terminal.event, data: { phase: "start", startedAt: 1_000 } },
+    });
+    const end = owner.observe(terminal);
+    scheduler.beginClose();
+    const draining = owner.drain();
+    expect(persistLifecycle).toHaveBeenCalledOnce();
+    releaseStart.resolve();
+    await Promise.all([start, end, draining]);
+    expect(phases).toEqual(["start", "end"]);
   });
 
   it.each([false, true])(

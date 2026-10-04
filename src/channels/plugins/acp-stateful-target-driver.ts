@@ -94,6 +94,7 @@ export const acpStatefulBindingTargetDriver: StatefulBindingTargetDriver = {
         ok: true,
         sessionKey: result.key,
         sessionId: result.entry.sessionId,
+        lifecycleRevision: result.entry.lifecycleRevision,
         storePath: result.storePath,
       };
     }

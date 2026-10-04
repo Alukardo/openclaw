@@ -18,7 +18,7 @@ import { admitChatSend } from "./chat-send-admission.js";
 import { normalizeChatSendRequest } from "./chat-send-request.js";
 import { prepareChatSendSession, qualifyChatSendSession } from "./chat-send-session.js";
 
-it("loads fresh admission metadata once after preparing the session", async () => {
+it("loads fresh admission metadata in the worker after preparing the session", async () => {
   await withOpenClawTestState({ label: "chat-admission-read-count" }, async () => {
     const cfg = {
       agents: { ownership: "explicit", entries: { main: {} } },
@@ -68,11 +68,11 @@ it("loads fresh admission metadata once after preparing the session", async () =
         }
         expect(admitted.value.admittedSessionSettings?.permissionMode).toBe("full");
         expect(admitted.value.admittedSessionId).toBe(entry.sessionId);
-        // Physical-source/absent-key guards may query keys without decoding entry metadata.
+        // The admission owner still checks its physical source and absent-key guards.
         const metadataReads = sql.queries.filter(
           (query) => /\bsession_nodes\b/u.test(query) && /\bentry_json\b/u.test(query),
         );
-        expect(metadataReads.length, metadataReads.join("\n")).toBeLessThanOrEqual(1);
+        expect(metadataReads).toEqual([]);
       } finally {
         sql.restore();
       }

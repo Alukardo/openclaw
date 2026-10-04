@@ -44,6 +44,16 @@ const loadGatewaySessionLifecycleSnapshotMock = vi.hoisted(() => vi.fn());
 const logErrorMock = vi.fn();
 const logWarnMock = vi.fn();
 const loadGatewaySessionRow = vi.hoisted(() => vi.fn());
+const emptySessionLookup = vi.hoisted(() => () => ({
+  cfg: {},
+  agentId: "main",
+  storePath: "/tmp/sessions.json",
+  store: {},
+  entry: undefined,
+  canonicalKey: "session-1",
+  storeKeys: ["session-1"],
+  legacyKey: undefined,
+}));
 
 vi.mock("../logger.js", () => ({
   logError: (...args: unknown[]) => logErrorMock(...args),
@@ -62,21 +72,19 @@ vi.mock("../infra/heartbeat-visibility.js", () => ({
   })),
 }));
 
+// mock-isolation: Session projection fixtures own their entries without native database admission.
 vi.mock("./session-utils.js", () => {
-  const loadSessionEntry = vi.fn(() => ({
-    cfg: {},
-    storePath: "/tmp/sessions.json",
-    store: {},
-    entry: undefined,
-    canonicalKey: "session-1",
-    storeKeys: ["session-1"],
-    legacyKey: undefined,
-  }));
+  const loadSessionEntry = vi.fn(emptySessionLookup);
   return {
     loadSessionEntry,
     loadGatewaySessionEntryReadOnly: loadSessionEntry,
   };
 });
+
+// mock-isolation: Reuse controlled session state without admitting a worker database.
+vi.mock("./session-utils-store-worker.js", () => ({
+  loadGatewaySessionEntryReadOnlyInWorker: async () => loadSessionEntry("session-1"),
+}));
 
 import { getRuntimeConfig } from "../config/io.js";
 import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
@@ -116,18 +124,7 @@ describe("agent event handler", () => {
       showAlerts: true,
       useIndicator: true,
     });
-    vi.mocked(loadSessionEntry)
-      .mockReset()
-      .mockReturnValue({
-        cfg: {},
-        agentId: "main",
-        storePath: "/tmp/sessions.json",
-        store: {},
-        entry: undefined,
-        canonicalKey: "session-1",
-        storeKeys: ["session-1"],
-        legacyKey: undefined,
-      });
+    vi.mocked(loadSessionEntry).mockReset().mockReturnValue(emptySessionLookup());
     vi.mocked(loadGatewaySessionRow).mockReset().mockReturnValue(null);
     loadGatewaySessionLifecycleSnapshotMock
       .mockReset()
@@ -1711,7 +1708,7 @@ describe("agent event handler", () => {
     }
   });
 
-  it("suppresses late interrupted pre-restart lifecycle events from live projections", () => {
+  it("suppresses late interrupted pre-restart lifecycle events from live projections", async () => {
     mockSessionEntry(
       {
         sessionId: "session-recovery",
@@ -1734,7 +1731,7 @@ describe("agent event handler", () => {
     h.sessionEventSubscribers.subscribe("conn-session");
     h.register("interrupted-run", "session-recovery", "interrupted-run");
 
-    h.emit(
+    await h.emit(
       "interrupted-run",
       "lifecycle",
       {
@@ -2938,7 +2935,7 @@ describe("agent event handler", () => {
     },
   );
 
-  it("does not project maintenance child events onto its selected parent session", () => {
+  it("does not project maintenance child events onto its selected parent session", async () => {
     const runId = "run-maintenance-child";
     const sessionKey = "session-maintenance-parent";
     const settleTrackedTerminal = vi.fn();
@@ -2963,6 +2960,7 @@ describe("agent event handler", () => {
       emitRuntimeAgentEvent({ runId, stream, data });
     }
     stop();
+    await h.handler.dispose();
     expect(h.chat()).toHaveLength(0);
     expect(h.agent()).toHaveLength(0);
     expect(h.broadcastToConnIds).not.toHaveBeenCalled();

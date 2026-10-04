@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
 import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
@@ -15,6 +16,7 @@ import {
   appendTranscriptMessageSync,
   publishTranscriptUpdate,
   readActiveTranscriptEntryAnchor,
+  resolveSessionTranscriptDatabasePath,
   replaceSessionEntry,
   rewriteTranscriptMessageAtAnchor,
   SessionTranscriptProjectionUnavailableError,
@@ -95,6 +97,7 @@ async function createReplyTranscriptFixture(sessionKey = "agent:main:receipt") {
     logGateway: { ...createSubsystemLogger("test/chat-send-reply-dispatch"), warn: vi.fn() },
     session: {
       ...scope,
+      entry: sessionEntry,
       backingSessionId: scope.sessionId,
       cfg: {},
       clientRunId: runId,
@@ -285,7 +288,7 @@ describe("chat delivery watermark preparation", () => {
   });
 
   it.each([false, true])(
-    "keeps watermark SQLite with its owner (incognito=%s)",
+    "keeps watermark and current-session SQLite with their owner (incognito=%s)",
     async (incognito) => {
       await withOpenClawTestState({ label: "chat-watermark-owner" }, async () => {
         const { dispatch, append } = await createReplyTranscriptFixture(
@@ -294,7 +297,17 @@ describe("chat delivery watermark preparation", () => {
         await dispatch.runAgentMediaTranscript(
           { run: async (operation) => operation() },
           async () => {
-            dispatch.captureAgentTranscriptStart();
+            const startingSql = observeHostDataSql();
+            try {
+              dispatch.captureAgentTranscriptStart();
+              expect(
+                startingSql.queries.filter((query) =>
+                  /\bfrom\s+"?session_(?:nodes|participants)\b/i.test(query),
+                ),
+              ).toEqual([]);
+            } finally {
+              startingSql.restore();
+            }
             await append("answer", { role: "assistant", content: "Committed answer." });
             const sql = observeHostDataSql();
             try {
@@ -305,6 +318,10 @@ describe("chat delivery watermark preparation", () => {
                   query.includes('from "transcript_rewrite_watermarks"'),
               );
               expect(watermarks.length > 0).toBe(incognito);
+              const sessionReads = sql.queries.filter((query) =>
+                /\bfrom\s+"?session_(?:nodes|participants)\b/i.test(query),
+              );
+              expect(sessionReads.length > 0).toBe(incognito);
             } finally {
               sql.restore();
             }
@@ -849,6 +866,7 @@ describe("createChatSendReplyDispatch", () => {
     "retired",
     "aborted",
     "lifecycle",
+    "foreign-lifecycle",
     "branch",
     "answer-rewrite",
     "input-rewrite",
@@ -876,6 +894,17 @@ describe("createChatSendReplyDispatch", () => {
               lifecycleRevision: "replacement",
               updatedAt: 2,
             });
+          } else if (change === "foreign-lifecycle") {
+            const foreign = new DatabaseSync(resolveSessionTranscriptDatabasePath(scope));
+            try {
+              foreign
+                .prepare(
+                  "UPDATE session_nodes SET entry_json = json_set(entry_json, '$.lifecycleRevision', ?) WHERE session_key = ?",
+                )
+                .run("foreign-replacement", scope.sessionKey);
+            } finally {
+              foreign.close();
+            }
           } else if (change === "branch") {
             await append("other-branch", { role: "assistant", content: "NO_REPLY" }, inputId);
           } else {

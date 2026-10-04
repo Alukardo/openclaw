@@ -13,6 +13,7 @@ import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js"
 import { resolveEffectiveAgentRuntime } from "../../agents/thinking-runtime.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { resolveTextCommand } from "../../auto-reply/commands-registry.js";
+import { getRuntimeConfig } from "../../config/io.js";
 import {
   resolveAgentMainSessionKey,
   resolveSessionRoutingContract,
@@ -34,6 +35,8 @@ import { hasGatewayAdminScope } from "../operator-scopes.js";
 import { pendingChatSendDedupeKey } from "../server-shared.js";
 import { resolveOperatorSessionCreation } from "../session-creation-provenance.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
+import { captureSessionMutationRouting } from "../session-sharing-preparation.js";
+import { loadGatewaySessionEntryReadOnlyInWorker } from "../session-utils-store-worker.js";
 import {
   loadSessionEntry,
   resolveDeletedAgentIdFromSessionKey,
@@ -272,12 +275,21 @@ export function qualifyChatSendSession(loaded: LoadedChatSendSession): PreparedC
 }
 
 /** Admission reloads once, retaining the original physical choice and logical identity. */
-export function loadCurrentChatSendSession(session: PreparedChatSendSession) {
-  const latest = loadSessionEntry(session.sessionLoadKey, {
+export async function loadCurrentChatSendSession(session: PreparedChatSendSession) {
+  session.assertSessionTargetCurrent();
+  const cfg = getRuntimeConfig();
+  const assertRoutingCurrent = captureSessionMutationRouting(cfg);
+  const latest = await loadGatewaySessionEntryReadOnlyInWorker({
+    cfg,
+    key: session.sessionLoadKey,
+    excludeInternalEffects: true,
     ...session.sessionLoadOptions,
-    clone: false,
+    assertActive: () => {
+      session.assertSessionTargetCurrent();
+      assertRoutingCurrent(getRuntimeConfig());
+    },
   });
-  if (session.sessionRoutingChanged(latest.cfg)) {
+  if (session.sessionRoutingChanged(getRuntimeConfig())) {
     throw new Error(SESSION_ROUTING_CHANGED_ERROR_REASON);
   }
   if (

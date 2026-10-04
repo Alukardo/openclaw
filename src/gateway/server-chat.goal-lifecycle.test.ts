@@ -21,6 +21,10 @@ vi.mock("./session-utils.js", () => {
   const load = vi.fn();
   return { loadSessionEntry: load, loadGatewaySessionEntryReadOnly: load };
 });
+vi.mock("./session-utils-store-worker.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./session-utils-store-worker.js")>()),
+  loadGatewaySessionEntryReadOnlyInWorker: async () => loadSessionEntry("session-terminal-error"),
+}));
 
 const persistGatewaySessionLifecycleEventMock = vi.fn();
 const loadGatewaySessionRow = vi.fn();
@@ -83,7 +87,7 @@ describe("agent event goal lifecycle", () => {
     },
   ])("persists $name without waiting for retry grace", ({ terminal, status }) =>
     withOpenClawTestState({ label: "terminal-projection" }, async (state) => {
-      const sessionKey = "session-terminal-error";
+      const sessionKey = "agent:main:session-terminal-error";
       const storePath = state.statePath("agents", "main", "sessions", "sessions.json");
       const target = { storePath, sessionKey };
       const read = () => loadStoredSessionEntry({ ...target, readConsistency: "latest" });

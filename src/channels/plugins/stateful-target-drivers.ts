@@ -7,7 +7,13 @@ import type {
 
 type StatefulBindingTargetReadyResult = { ok: true } | { ok: false; error: string };
 export type StatefulBindingTargetResetResult =
-  | { ok: true; sessionKey?: string; sessionId?: string; storePath?: string }
+  | {
+      ok: true;
+      sessionKey?: string;
+      sessionId?: string;
+      lifecycleRevision?: string;
+      storePath?: string;
+    }
   | { ok: false; skipped?: boolean; error?: string };
 
 /** Driver contract for lifecycle operations on one stateful target family. */

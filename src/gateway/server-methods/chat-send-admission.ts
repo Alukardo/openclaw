@@ -235,9 +235,9 @@ export async function admitChatSend(
         commitChatWorkAdmission(acpMeta, prepared),
       );
     }
-    const current = prepareCurrentChatSendRetry(params, pendingAttemptId);
+    const current = await prepareCurrentChatSendRetry(params, pendingAttemptId);
     retryComparison = current.comparison ? await current.comparison : undefined;
-    const latestSession = current.readSession();
+    const latestSession = await current.readSession();
     params.assertCurrent?.();
     const retainedRequestConflict = resolveChatSendRequestConflict(params, retryComparison);
     if (retainedRequestConflict) {
@@ -430,7 +430,7 @@ export async function admitChatSend(
         if (!restartSafeRequest) {
           return commitChatWorkAdmission(null);
         }
-        const latest = loadCurrentChatSendSession(session);
+        const latest = await loadCurrentChatSendSession(session);
         const [acpMeta] = await readAcpSessionMetaForEntries({
           cfg: latest.cfg,
           entries: [{ agentId, sessionKey: latest.canonicalKey, entry: latest.entry }],

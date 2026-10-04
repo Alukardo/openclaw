@@ -78,18 +78,18 @@ export function consumeChatSendAdmissionRetry(
 }
 
 /** Reload after an actual worker wait in the consuming admission frame. */
-export function prepareCurrentChatSendRetry(
+export async function prepareCurrentChatSendRetry(
   params: ChatSendPreAdmissionParams & { session: PreparedChatSendSession },
   ownPendingAttemptId: string,
 ) {
-  const session = loadCurrentChatSendSession(params.session);
+  const session = await loadCurrentChatSendSession(params.session);
   const comparison = prepareChatSendRetryComparison(
     { ...params, session: { ...params.session, entry: session.entry } },
     ownPendingAttemptId,
   );
   return {
     comparison,
-    readSession: () => (comparison ? loadCurrentChatSendSession(params.session) : session),
+    readSession: async () => (comparison ? loadCurrentChatSendSession(params.session) : session),
   };
 }
 

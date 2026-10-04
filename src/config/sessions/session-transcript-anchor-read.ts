@@ -47,7 +47,11 @@ export async function readSessionTranscriptAnchorsAsync(
     ...(scope.storePath ? { storePath: path.resolve(scope.storePath) } : {}),
     env: captureSessionTranscriptStorageEnvironment(scope.env ?? process.env),
   };
-  const request = { entryIds: [...selection.entryIds], afterSeq: selection.afterSeq };
+  const request = {
+    entryIds: [...selection.entryIds],
+    afterSeq: selection.afterSeq,
+    includeSession: selection.includeSession,
+  };
   signal?.throwIfAborted();
   if (
     isIncognitoSessionKey(captured.sessionKey) ||

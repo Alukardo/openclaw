@@ -14,7 +14,6 @@ import {
 import type { ReplyDispatcherOptions } from "../../auto-reply/reply/reply-dispatcher.js";
 import type { ReplyDispatchOperation } from "../../auto-reply/reply/reply-dispatcher.types.js";
 import {
-  readSessionTranscriptWatermark,
   resolveSessionTranscriptDatabasePath,
   waitForSessionTranscriptProjection,
 } from "../../config/sessions/session-accessor.js";
@@ -49,7 +48,6 @@ import {
   readSessionMessageByIdAsync,
   readSessionTranscriptWatermarkAsync,
 } from "../session-transcript-readers.js";
-import { loadSessionEntry } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
 import {
   combineNonStreamingReplyParts,
@@ -73,7 +71,7 @@ import {
 } from "./chat-send-command-replies.js";
 import { observeChatSendCommentaryMedia } from "./chat-send-commentary-media.js";
 import { resolveChatReplyDeliveryFromAnchors } from "./chat-send-reply-delivery.js";
-import type { PreparedChatSendSession } from "./chat-send-session.js";
+import { createChatReplySessionReader, type ChatReplySession } from "./chat-send-reply-session.js";
 import { appendInjectedAssistantMessageToTranscript } from "./chat-transcript-inject.js";
 import {
   assistantTranscriptScope,
@@ -150,16 +148,15 @@ export function createChatSendReplyDispatch(params: {
   getReplyDispatchRun?: () => ReplyDispatchRun | undefined;
   prepareAssistantTranscriptMessage?: PrepareAssistantTranscriptMessage;
   logGateway: GatewayRequestContext["logGateway"];
-  session: Pick<
-    PreparedChatSendSession,
-    "agentId" | "backingSessionId" | "cfg" | "clientRunId" | "sessionKey" | "sessionLoadOptions"
-  >;
+  session: ChatReplySession;
   userTurnRecorder: Pick<UserTurnTranscriptRecorder, "markBlocked" | "getAdmissionReceipt">;
 }) {
   const { accountId, isAgentRunStarted, logGateway, session, userTurnRecorder } = params;
   const { backingSessionId, cfg, clientRunId } = session;
   // Extract scalar transcript bindings from borrowed entries; reread after asynchronous work.
   const sessionLoadOptions = { ...session.sessionLoadOptions, clone: false };
+  const { notePreparedSession, readCurrentSession, captureTranscriptStart } =
+    createChatReplySessionReader(session);
   let assistantTranscriptRewriteState = {
     sessionId: undefined as string | undefined,
     generation: null as string | null,
@@ -169,22 +166,9 @@ export function createChatSendReplyDispatch(params: {
   let agentTranscriptLifecycleRevision: string | undefined;
   const captureAgentTranscriptStart = (runId = clientRunId) => {
     agentRunId = runId;
-    const current = loadSessionEntry(session.sessionKey, sessionLoadOptions);
-    const sessionId = current.entry?.sessionId ?? backingSessionId;
-    const watermark = sessionId
-      ? readSessionTranscriptWatermark({
-          agentId: session.agentId,
-          sessionId,
-          sessionKey: session.sessionKey,
-          storePath: current.storePath,
-        })
-      : { generation: null, maxSeq: null };
-    assistantTranscriptRewriteState = {
-      sessionId,
-      generation: watermark.generation,
-      afterSeq: watermark.maxSeq ?? 0,
-    };
-    agentTranscriptLifecycleRevision = current.entry?.lifecycleRevision;
+    const { lifecycleRevision, ...start } = captureTranscriptStart();
+    assistantTranscriptRewriteState = start;
+    agentTranscriptLifecycleRevision = lifecycleRevision;
     return true;
   };
   const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
@@ -217,7 +201,7 @@ export function createChatSendReplyDispatch(params: {
     const transcriptStart = assistantTranscriptRewriteState;
     const runId = agentRunId;
     const lifecycleRevision = agentTranscriptLifecycleRevision;
-    const isCurrent = () => {
+    const isRunCurrent = () => {
       const currentAdmission = userTurnRecorder.getAdmissionReceipt();
       if (
         !admission ||
@@ -233,8 +217,15 @@ export function createChatSendReplyDispatch(params: {
       ) {
         return false;
       }
-      const current = loadSessionEntry(session.sessionKey, sessionLoadOptions);
+      return true;
+    };
+    const isCurrent = async () => {
+      if (!admission || !isRunCurrent()) {
+        return false;
+      }
+      const current = await readCurrentSession();
       return (
+        isRunCurrent() &&
         current.entry?.sessionId === admission.sessionId &&
         current.entry.lifecycleRevision === lifecycleRevision &&
         resolveSessionTranscriptDatabasePath({
@@ -245,23 +236,23 @@ export function createChatSendReplyDispatch(params: {
         }) === admission.storePath
       );
     };
-    if (!admission || transcriptStart.sessionId !== admission.sessionId || !isCurrent()) {
+    if (!admission || transcriptStart.sessionId !== admission.sessionId || !(await isCurrent())) {
       return "missing";
     }
     const scope = admission;
     await waitForSessionTranscriptProjection(scope, params.abortSignal);
-    if (!isCurrent()) {
+    if (!(await isCurrent())) {
       return "missing";
     }
     const watermark = await readSessionTranscriptWatermarkAsync(scope);
-    if (!isCurrent()) {
+    if (!(await isCurrent())) {
       return "missing";
     }
     const initial = await readSessionTranscriptAnchorsAsync(scope, {
       entryIds: [admission.entryId],
       afterSeq: transcriptStart.afterSeq,
     });
-    if (!isCurrent()) {
+    if (!(await isCurrent())) {
       return "missing";
     }
     const input = initial.anchors[0];
@@ -293,7 +284,7 @@ export function createChatSendReplyDispatch(params: {
         maxBytes: Number.MAX_SAFE_INTEGER,
       });
       const admitted = await readActiveTranscriptEntryAnchorAsync(admission);
-      if (!isCurrent() || !admitted) {
+      if (!(await isCurrent()) || !admitted) {
         return "missing";
       }
       if (!stored.found) {
@@ -324,10 +315,15 @@ export function createChatSendReplyDispatch(params: {
           {
             entryIds: [admission.entryId, latestInputId, messageId],
             afterSeq: transcriptStart.afterSeq,
+            includeSession: true,
           },
           undefined,
           (facts) => {
-            if (!isCurrent()) {
+            if (
+              !isRunCurrent() ||
+              facts.session?.sessionId !== admission.sessionId ||
+              facts.session.lifecycleRevision !== lifecycleRevision
+            ) {
               decision = "missing";
               return;
             }
@@ -342,7 +338,7 @@ export function createChatSendReplyDispatch(params: {
             });
           },
         );
-        if (!isCurrent()) {
+        if (!(await isCurrent())) {
           return "missing";
         }
         if (decision !== undefined) {
@@ -406,10 +402,10 @@ export function createChatSendReplyDispatch(params: {
         }
       },
     });
-    const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey, {
-      ...sessionLoadOptions,
-      ...(agentId ? { agentId } : {}),
-    });
+    const { storePath: latestStorePath, entry: latestEntry } = await readCurrentSession(
+      sessionKey,
+      agentId,
+    );
     const sessionId = latestEntry?.sessionId ?? backingSessionId ?? clientRunId;
     const {
       payloads: [transcriptPayload],
@@ -473,8 +469,7 @@ export function createChatSendReplyDispatch(params: {
       // Receipt identity is not authority after asynchronous media preparation.
       if (
         transcript &&
-        loadSessionEntry(sessionKey, { ...sessionLoadOptions, agentId }).entry?.sessionId !==
-          transcript.sessionId
+        (await readCurrentSession(sessionKey, agentId)).entry?.sessionId !== transcript.sessionId
       ) {
         logGateway.warn("webchat runtime-owned media skipped: transcript session changed");
         return;
@@ -712,6 +707,7 @@ export function createChatSendReplyDispatch(params: {
   };
   return {
     captureAgentTranscriptStart,
+    notePreparedSession,
     deliveredReplies,
     dispatcherOptions,
     hasAppendedWebchatAgentMedia: () => finalizedAgentMediaTranscriptKeys.size > 0,
