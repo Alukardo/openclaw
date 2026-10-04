@@ -1281,7 +1281,7 @@ describe("agent event handler", () => {
       verboseLevel: "full",
     });
     h.toolEventRecipients.add(runId, "conn-selected");
-    const stop = onAgentRuntimeEvent(h.handler);
+    const stop = subscribeAgentEvents(h.handler);
     try {
       for (let added = 1; added <= 32; added++) {
         emitRuntimeAgentEvent({
