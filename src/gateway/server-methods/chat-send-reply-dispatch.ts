@@ -1,7 +1,5 @@
-import { isAudioFileName } from "@openclaw/media-core/mime";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
-import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import type { ReplyDeliveryState } from "../../agents/reply-completion.js";
 import type {
   PreparedReplyTranscriptStart,
@@ -16,6 +14,7 @@ import {
 } from "../../auto-reply/reply-payload.js";
 import type { ReplyDispatcherOptions } from "../../auto-reply/reply/reply-dispatcher.js";
 import type { ReplyDispatchOperation } from "../../auto-reply/reply/reply-dispatcher.types.js";
+import { getRuntimeConfig } from "../../config/io.js";
 import {
   resolveSessionTranscriptDatabasePath,
   waitForSessionTranscriptProjection,
@@ -37,16 +36,12 @@ import {
   extractAssistantPhaseText,
   extractAssistantTextForPhase,
 } from "../../shared/chat-message-content.js";
-import {
-  parseInlineDirectives,
-  stripInlineDirectiveTagsForDelivery,
-  sanitizeReplyDirectiveId,
-} from "../../utils/directive-tags.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import { isToolHistoryBlockType } from "../chat-display-projection.canvas.js";
 import { projectChatDisplayMessage } from "../chat-display-projection.js";
 import { isSuppressedControlReplyText } from "../control-reply-text.js";
 import { attachManagedOutgoingMediaToMessage } from "../managed-image-attachments.js";
+import { captureSessionMutationRouting } from "../session-sharing-preparation.js";
 import {
   readSessionMessageByIdAsync,
   readSessionTranscriptWatermarkAsync,
@@ -68,6 +63,7 @@ import {
   type WebchatReplyMediaRequesterContext,
 } from "./chat-reply-media.js";
 import {
+  buildTranscriptReplyTextFromInputs,
   readChatSendReplyPayload,
   replaceChatSendReplyPayload,
   type DeliveredChatSendReply,
@@ -87,58 +83,6 @@ import {
   stripVisibleTextFromTtsSupplement,
 } from "./chat-tts-markers.js";
 import type { GatewayRequestContext } from "./types.js";
-
-export function buildTranscriptReplyTextFromInputs(
-  inputs: readonly ReplyDispatchOperation[],
-): string {
-  const chunks = inputs
-    .map((input) => {
-      const payload = readChatSendReplyPayload(input);
-      if (payload.isReasoning === true) {
-        return "";
-      }
-      const parts =
-        input.kind === "prepared" ? input.plan.parts : resolveSendableOutboundReplyParts(payload);
-      const lines: string[] = [];
-      const parsedText =
-        input.kind === "raw" && payload.text?.includes("[[")
-          ? parseInlineDirectives(payload.text)
-          : undefined;
-      const replyToId =
-        sanitizeReplyDirectiveId(payload.replyToId) ??
-        sanitizeReplyDirectiveId(parsedText?.replyToExplicitId);
-      if (replyToId) {
-        lines.push(`[[reply_to:${replyToId}]]`);
-      } else if (payload.replyToCurrent || parsedText?.replyToCurrent) {
-        lines.push("[[reply_to_current]]");
-      }
-      const text =
-        input.kind === "raw" && payload.text
-          ? stripInlineDirectiveTagsForDelivery(payload.text).text
-          : (payload.text ?? "");
-      if (text.trim() && (input.kind === "prepared" || !isSuppressedControlReplyText(text))) {
-        lines.push(text);
-      }
-      for (const mediaUrl of parts.mediaUrls) {
-        if (payload.sensitiveMedia === true) {
-          continue;
-        }
-        const trimmed = mediaUrl.trim();
-        if (trimmed) {
-          lines.push(`Attachment: ${trimmed}`);
-        }
-      }
-      if (
-        (payload.audioAsVoice || parsedText?.audioAsVoice) &&
-        parts.mediaUrls.some((mediaUrl) => isAudioFileName(mediaUrl))
-      ) {
-        lines.push("[[audio_as_voice]]");
-      }
-      return lines.join("\n");
-    })
-    .filter(Boolean);
-  return combineNonStreamingReplyParts(chunks);
-}
 
 /** Build delivery options and capture state for the core-owned webchat dispatcher. */
 export function createChatSendReplyDispatch(params: {
@@ -314,6 +258,10 @@ export function createChatSendReplyDispatch(params: {
         extractAssistantPhaseText(projectChatDisplayMessage(message))
       ) {
         const currentWatermark = await readSessionTranscriptWatermarkAsync(scope);
+        const assertRoutingCurrent = captureSessionMutationRouting(getRuntimeConfig());
+        if (!(await isCurrent())) {
+          return "missing";
+        }
         // Consume final facts inside the existing writer FIFO; projection repair and
         // message restoration above must stay outside because they can need that writer.
         let decision: ReplyDeliveryState | undefined = "pending";
@@ -326,6 +274,7 @@ export function createChatSendReplyDispatch(params: {
           },
           undefined,
           (facts) => {
+            assertRoutingCurrent(getRuntimeConfig());
             if (
               !isRunCurrent() ||
               facts.session?.sessionId !== admission.sessionId ||
@@ -345,7 +294,9 @@ export function createChatSendReplyDispatch(params: {
             });
           },
         );
-        if (!(await isCurrent())) {
+        // Another worker lookup here could invalidate the completed anchor decision.
+        assertRoutingCurrent(getRuntimeConfig());
+        if (!isRunCurrent()) {
           return "missing";
         }
         if (decision !== undefined) {
