@@ -12,14 +12,16 @@ const persistence = vi.hoisted(() => ({
   patch: vi.fn(),
   load: vi.fn<typeof loadGatewaySessionEntryReadOnlyInWorker>(),
 }));
-vi.mock("../config/sessions/session-accessor.js", () => ({
+vi.mock("../config/sessions/session-accessor.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config/sessions/session-accessor.js")>()),
   patchSessionEntryCore: persistence.patch,
   patchSessionEntryTarget: persistence.patch,
   loadSessionEntryReadOnly: vi.fn(),
   readSessionTranscriptWatermark: vi.fn(),
   appendSessionTranscriptReport: vi.fn(async () => ({ ok: true, value: undefined })),
 }));
-vi.mock("./session-utils-store-worker.js", () => ({
+vi.mock("./session-utils-store-worker.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./session-utils-store-worker.js")>()),
   loadGatewaySessionEntryReadOnlyInWorker: persistence.load,
 }));
 

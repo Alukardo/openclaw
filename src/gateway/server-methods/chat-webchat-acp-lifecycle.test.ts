@@ -24,7 +24,8 @@ vi.mock("../../audit/audit-recorder.js", () => ({
 vi.mock("../server-chat.js", () => ({
   createAgentEventHandler: (...args: unknown[]) => agentEventHandlerMocks.create(...args),
 }));
-vi.mock("../session-lifecycle-state.js", () => ({
+vi.mock("../session-lifecycle-state.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../session-lifecycle-state.js")>()),
   prepareGatewaySessionLifecycleEvent: (params: unknown) => () =>
     agentEventHandlerMocks.persistLifecycle(params),
 }));
