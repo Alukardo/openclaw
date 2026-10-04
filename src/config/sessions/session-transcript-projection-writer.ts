@@ -1,6 +1,8 @@
 import { randomInt } from "node:crypto";
 import { setImmediate as yieldToGateway } from "node:timers/promises";
 import { executeSqliteQueryTakeFirstSync } from "../../infra/kysely-sync.js";
+import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
+import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import type { SqliteWorkerStore } from "../../infra/sqlite-worker-contract.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
 import {
@@ -8,14 +10,25 @@ import {
   isIncognitoOpenClawAgentSqlitePath,
   withOpenClawAgentDatabaseAsync,
   runOpenClawAgentWriteTransaction,
+  resolveOpenClawAgentSqlitePath,
   type OpenClawAgentDatabase,
   type OpenClawAgentDatabaseOptions,
 } from "../../state/openclaw-agent-db.js";
+import {
+  captureOpenClawAgentDatabaseExecution,
+  supportsOpenClawAgentDatabaseExecution,
+} from "../../state/openclaw-agent-execution.js";
+import {
+  openOpenClawAgentSqliteWorkerStore,
+  type OpenClawAgentSqliteWorkerStore,
+} from "../../state/openclaw-agent-worker-store.js";
 import {
   getSessionKysely,
   runExclusiveSqliteSessionWrite,
 } from "./session-accessor.sqlite-scope.js";
 import type { SqliteSessionWriteOperation } from "./session-accessor.sqlite-write-operation.js";
+import { drainTranscriptIndexStatus } from "./session-transcript-index-maintenance.js";
+import { listSessionsNeedingTranscriptIndexReconcile } from "./session-transcript-index.js";
 import type { TranscriptProjectionPublicationOperations } from "./session-transcript-projection-publication.worker.js";
 import {
   appendPreparedSessionTranscriptProjectionChunkInTransaction,
@@ -24,7 +37,10 @@ import {
   finalizePreparedSessionTranscriptProjectionInTransaction,
   type PreparedSessionTranscriptProjectionMetadata,
 } from "./session-transcript-projection-rebuild.js";
-import type { MemoryTranscriptProjectionSource } from "./session-transcript-reconcile-memory.js";
+import {
+  createMemoryTranscriptProjectionSource,
+  type MemoryTranscriptProjectionSource,
+} from "./session-transcript-reconcile-memory.js";
 
 const PROJECTION_WRITE_CHUNK_ROWS = 512;
 export type ReconcileDatabaseOptions = OpenClawAgentDatabaseOptions & {
@@ -185,4 +201,72 @@ export async function finalizePreparedProjection(
     },
     memorySource,
   );
+}
+
+/** Global readiness is a fact maintained on the projection writer's connection. */
+export async function readSessionTranscriptIndexStatus(
+  params: OpenClawAgentDatabaseOptions,
+  assertCurrent?: () => void,
+): Promise<boolean> {
+  assertCurrent?.();
+  const options: ReconcileDatabaseOptions = {
+    ...params,
+    env: { ...(params.env ?? process.env) },
+    path: resolveOpenClawAgentSqlitePath(params),
+  };
+  const execution = supportsOpenClawAgentDatabaseExecution(options)
+    ? captureOpenClawAgentDatabaseExecution(options)
+    : undefined;
+  let client: OpenClawAgentSqliteWorkerStore<TranscriptProjectionPublicationOperations> | undefined;
+  const opened = execution ? undefined : getOpenClawAgentDatabaseIfOpen(options);
+  const memorySource =
+    opened && isIncognitoOpenClawAgentSqlitePath(options.path, options)
+      ? createMemoryTranscriptProjectionSource(opened, options)
+      : undefined;
+  try {
+    if (execution) {
+      client = await openOpenClawAgentSqliteWorkerStore<TranscriptProjectionPublicationOperations>(
+        options,
+        { execution },
+        {
+          moduleUrl: resolveRuntimeWorkerUrl(
+            runtimeProcessEntrypoints.sessionTranscriptProjectionPublication,
+          ),
+          input: undefined,
+        },
+      );
+    }
+    const status = client
+      ? await drainTranscriptIndexStatus(async () => {
+          const receipt = await client!.executeExisting(
+            { type: "preflight", input: undefined },
+            () => {
+              assertCurrent?.();
+              execution!.assertCurrent();
+            },
+          );
+          return receipt?.value ?? { sessionIds: [], hasMore: false, traversalComplete: true };
+        })
+      : await runProjectionWrite(
+          options,
+          "sessions.transcript-index.preflight",
+          (database) => {
+            assertCurrent?.();
+            return {
+              sessionIds: listSessionsNeedingTranscriptIndexReconcile(database.db),
+              hasMore: false,
+            };
+          },
+          memorySource,
+        );
+    assertCurrent?.();
+    return status.hasMore || status.sessionIds.length > 0;
+  } finally {
+    memorySource?.clear();
+    try {
+      await client?.close();
+    } finally {
+      await execution?.release();
+    }
+  }
 }

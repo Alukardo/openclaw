@@ -18,7 +18,7 @@ import type {
   IncognitoComputeTarget,
   IncognitoUsageCacheOperations,
 } from "./session-incognito-compute-contract.js";
-import type { TranscriptProjectionPublicationOperations } from "./session-transcript-projection-publication.worker.js";
+import type { TranscriptProjectionRebuildOperations } from "./session-transcript-projection-publication.worker.js";
 import { deletePreparedSessionTranscriptProjectionChunkInTransaction } from "./session-transcript-projection-rebuild.js";
 import {
   createMemoryTranscriptProjectionSource,
@@ -112,7 +112,7 @@ export function createIncognitoComputeWorker(
       const input = command.input;
       keys = [input.sessionKey];
       const executeProjection = (
-        inner: SqliteWorkerCommand<TranscriptProjectionPublicationOperations>,
+        inner: SqliteWorkerCommand<TranscriptProjectionRebuildOperations>,
       ) => {
         if (!projection) {
           throw new Error("Incognito projection domain was not prepared");

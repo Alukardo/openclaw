@@ -54,6 +54,12 @@ type SessionArchivePresenceWorkerInput = TranscriptArchivePresenceRead & {
   kind: "session-archive-presence";
 };
 
+export type SessionColdStorageInventoryWorkerInput = {
+  kind: "cold-storage-inventory";
+  database: { agentId: string; path: string };
+  env: NodeJS.ProcessEnv;
+};
+
 export type SessionTranscriptInventoryWorkerInput =
   | MemorySessionTargetsWorkerInput
   | SessionArchiveInventoryWorkerInput

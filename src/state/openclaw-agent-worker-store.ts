@@ -61,6 +61,17 @@ function reportCompletedPublicationCleanupFailure(error: unknown): void {
 }
 
 export type OpenClawAgentSqliteWorkerStore<Operations extends SqliteWorkerOperations> = {
+  execute<Key extends keyof Operations>(
+    command: { type: Key; input: Operations[Key]["input"] },
+    assertCurrent: () => void,
+    options?: { signal?: AbortSignal },
+  ): Promise<Operations[Key]["output"]>;
+  /** Absence has no receipt; a present command can legitimately return undefined. */
+  executeExisting<Key extends keyof Operations>(
+    command: { type: Key; input: Operations[Key]["input"] },
+    assertCurrent: () => void,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ value: Operations[Key]["output"] } | undefined>;
   run<T>(
     operation: (scope: Pick<SqliteWorkerStore<Operations>, "execute">) => Promise<T>,
     assertCurrent: () => void,
@@ -108,15 +119,7 @@ export async function openOpenClawAgentSqliteWorkerStore<Operations extends Sqli
     /** Only for an accepted sequence whose owner closes this store at settlement. */
     retainExecutionUntilClose?: true;
   },
-): Promise<
-  OpenClawAgentSqliteWorkerStore<Operations> & {
-    execute<Key extends keyof Operations>(
-      command: { type: Key; input: Operations[Key]["input"] },
-      assertCurrent: () => void,
-      options?: { signal?: AbortSignal },
-    ): Promise<Operations[Key]["output"]>;
-  }
-> {
+): Promise<OpenClawAgentSqliteWorkerStore<Operations>> {
   const env = cloneEnvWithPlatformSemantics(inputOptions.env ?? process.env);
   env.OPENCLAW_STATE_DIR = resolveStateDir(env);
   const options = {
@@ -349,45 +352,62 @@ export async function openOpenClawAgentSqliteWorkerStore<Operations extends Sqli
     void result.finally(() => pending.delete(result)).catch(() => {});
     return result;
   };
-  return {
-    async execute(command, assertCurrent, commandOptions) {
-      commandOptions?.signal?.throwIfAborted();
-      if (typeof command.type !== "string") {
-        throw new Error("Agent publication commands require a string type");
-      }
-      const publication = {
-        id: randomUUID(),
-        moduleUrl,
-        input,
-        command: { type: command.type, input: command.input },
-      };
-      const captured = serialize(publication);
-      const preparation = reserveSqliteWorkerInputPreparation(captured.byteLength, "snapshot");
-      try {
-        const result = runPublication(
-          assertCurrent,
-          async (execution, source) => {
-            const receipt = await execution.runExisting(source, async (scope) => ({
-              value: await preparation.handoff(() =>
-                executeOpenClawAgentWorkerPublication<Operations, typeof command.type>(
-                  scope,
-                  // SAFETY: These private bytes snapshot this method's typed publication above.
-                  deserialize(captured) as typeof publication,
-                  commandOptions,
-                ),
+  const executeCommand = async <Key extends keyof Operations, Output>(
+    command: { type: Key; input: Operations[Key]["input"] },
+    assertCurrent: () => void,
+    select: (receipt: { value: Operations[Key]["output"] } | undefined) => Output,
+    commandOptions?: { signal?: AbortSignal },
+  ): Promise<Output> => {
+    commandOptions?.signal?.throwIfAborted();
+    if (typeof command.type !== "string") {
+      throw new Error("Agent publication commands require a string type");
+    }
+    const publication = {
+      id: randomUUID(),
+      moduleUrl,
+      input,
+      command: { type: command.type, input: command.input },
+    };
+    const captured = serialize(publication);
+    const preparation = reserveSqliteWorkerInputPreparation(captured.byteLength, "snapshot");
+    try {
+      return await runPublication(
+        assertCurrent,
+        async (execution, source) => {
+          const receipt = await execution.runExisting(source, async (scope) => ({
+            value: await preparation.handoff(() =>
+              executeOpenClawAgentWorkerPublication<Operations, Key>(
+                scope,
+                // SAFETY: These private bytes snapshot this method's typed publication above.
+                deserialize(captured) as typeof publication,
+                commandOptions,
               ),
-            }));
-            if (!receipt) {
-              throw new Error("Agent database disappeared before publication");
-            }
-            return receipt.value;
-          },
-          commandOptions?.signal,
-        );
-        return await result;
-      } finally {
-        preparation.release();
-      }
+            ),
+          }));
+          return select(receipt);
+        },
+        commandOptions?.signal,
+      );
+    } finally {
+      preparation.release();
+    }
+  };
+  return {
+    execute(command, assertCurrent, commandOptions) {
+      return executeCommand(
+        command,
+        assertCurrent,
+        (receipt) => {
+          if (!receipt) {
+            throw new Error("Agent database disappeared before publication");
+          }
+          return receipt.value;
+        },
+        commandOptions,
+      );
+    },
+    executeExisting(command, assertCurrent, commandOptions) {
+      return executeCommand(command, assertCurrent, (receipt) => receipt, commandOptions);
     },
     run<T>(
       operation: (scope: Pick<SqliteWorkerStore<Operations>, "execute">) => Promise<T>,
