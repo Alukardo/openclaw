@@ -10061,7 +10061,6 @@ struct ChatViewModelTests {
 
         let send = await sendUserMessage(vm, text: "hello")
         await waitForObservedState { vm.isSending }
-        #expect(await MainActor.run { vm.isSending })
         #expect(await transport.lastSentRunId() == nil)
 
         await MainActor.run { vm.selectThinkingLevel("high") }
@@ -11060,7 +11059,6 @@ struct ChatViewModelTests {
         vm.input = "hello before switch"
         let send = vm.send()
         await waitForObservedState { vm.pendingRunCount == 1 }
-        #expect(vm.pendingRunCount == 1)
 
         vm.syncSession(to: "other")
         await vm.bootstrapTask?.value
@@ -11554,7 +11552,6 @@ struct ChatViewModelTests {
         #expect(await transport.patchedModels() == ["openai/gpt-5.4", "openai/gpt-5.4-pro"])
         await MainActor.run { vm.switchSession(to: "main") }
         await waitForObservedState { vm.sessionKey == "main" && vm.sessionId == "sess-main" }
-        #expect(await MainActor.run { vm.sessionKey == "main" && vm.sessionId == "sess-main" })
 
         // Bootstrap waits for the pending patch before loading its catalog.
         // Refresh it independently so the nil reply still resolves through model choices.
