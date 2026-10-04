@@ -1725,7 +1725,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: false)
         try await loadAndWaitBootstrap(vm: vm, sessionId: "sess-main")
         await waitForObservedState { vm.progressCardStoreAvailable == false }
-        #expect(await MainActor.run { vm.progressCardStoreAvailable == false })
 
         await MainActor.run {
             vm.handleTransportEvent(legacyPlanEvent(
@@ -1767,7 +1766,6 @@ struct ChatViewModelTests {
             })
         try await loadAndWaitBootstrap(vm: vm, sessionId: "sess-main")
         await waitForObservedState { vm.progressCardStoreAvailable == false }
-        #expect(await MainActor.run { vm.progressCardStoreAvailable == false })
         await MainActor.run {
             vm.handleTransportEvent(legacyPlanEvent(
                 steps: [legacyPlanStep("Old gateway step", status: "in_progress")]))
@@ -1798,7 +1796,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: true)
         try await loadAndWaitBootstrap(vm: vm, sessionId: "sess-main")
         await waitForObservedState { vm.progressCardStoreAvailable == true }
-        #expect(await MainActor.run { vm.progressCardStoreAvailable == true })
 
         await MainActor.run {
             vm.handleTransportEvent(legacyPlanEvent(
@@ -1834,7 +1831,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: false)
         try await loadAndWaitBootstrap(vm: vm, sessionId: "sess-main")
         await waitForObservedState { vm.progressCardStoreAvailable == false }
-        #expect(await MainActor.run { vm.progressCardStoreAvailable == false })
 
         let refresh = await MainActor.run {
             vm.progressCardStoreAvailable = nil
@@ -1855,7 +1851,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: false)
         try await loadAndWaitBootstrap(vm: vm, sessionId: "sess-main")
         await waitForObservedState { vm.progressCardStoreAvailable == false }
-        #expect(await MainActor.run { vm.progressCardStoreAvailable == false })
         await MainActor.run {
             vm.handleTransportEvent(legacyPlanEvent(
                 steps: [legacyPlanStep("Existing", status: "in_progress")]))
@@ -1875,7 +1870,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: false)
         try await loadAndWaitBootstrap(vm: vm, sessionId: "sess-main")
         await waitForObservedState { vm.progressCardStoreAvailable == false }
-        #expect(await MainActor.run { vm.progressCardStoreAvailable == false })
 
         await MainActor.run {
             vm.handleTransportEvent(legacyPlanEvent(
@@ -1934,7 +1928,6 @@ struct ChatViewModelTests {
             })
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.revision == 3 }
-        #expect(await MainActor.run { vm.progressCard?.revision == 3 })
 
         let refresh = await MainActor.run {
             vm.handleTransportEvent(.progressCardChanged(ProgressCardChangedEvent(
@@ -1957,7 +1950,6 @@ struct ChatViewModelTests {
             })
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.revision == 4 }
-        #expect(await MainActor.run { vm.progressCard?.revision == 4 })
 
         let refresh = await MainActor.run {
             vm.handleTransportEvent(.progressCardChanged(ProgressCardChangedEvent(
@@ -1980,7 +1972,6 @@ struct ChatViewModelTests {
             })
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.revision == 5 }
-        #expect(await MainActor.run { vm.progressCard?.revision == 5 })
 
         await MainActor.run {
             vm.handleTransportEvent(.progressCardChanged(ProgressCardChangedEvent(
@@ -2017,7 +2008,6 @@ struct ChatViewModelTests {
         await MainActor.run { vm.switchSession(to: "other") }
         #expect(await MainActor.run { vm.progressCard == nil })
         await waitForObservedState { vm.progressCard?.revision == 2 }
-        #expect(await MainActor.run { vm.progressCard?.revision == 2 })
         await oldFetchGate.open()
         try await Task.sleep(for: .milliseconds(50))
 
@@ -2057,7 +2047,6 @@ struct ChatViewModelTests {
             })
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.revision == 3 }
-        #expect(await MainActor.run { vm.progressCard?.revision == 3 })
 
         let failedRefresh = await MainActor.run {
             vm.handleTransportEvent(.progressCardChanged(ProgressCardChangedEvent(
@@ -2139,7 +2128,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: true)
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard != nil }
-        #expect(vm.progressCard != nil)
         #expect(await requests.current() == ["research|global"])
     }
 
@@ -2180,7 +2168,6 @@ struct ChatViewModelTests {
         #expect(vm.progressCard?.markdown == "Retained")
         await historyGate.release()
         await waitForObservedState { vm.progressCard?.markdown == "Research" }
-        #expect(vm.progressCard?.markdown == "Research")
         #expect(await requests.current() == ["research|global"])
     }
 
@@ -2266,7 +2253,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: true)
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard != nil }
-        #expect(vm.progressCard != nil)
         #expect(vm.sessionKey == "global")
         #expect(vm.progressCard?.markdown == "research raw global")
     }
@@ -2285,7 +2271,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: true)
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.markdown == "Retained raw global" }
-        #expect(vm.progressCard?.markdown == "Retained raw global")
         let before = await calls.current()
         // A different ordinary row has the same wire key and can emit this clear.
         let refresh = vm.handleTransportEvent(.progressCardChanged(ProgressCardChangedEvent(
@@ -2314,14 +2299,12 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: true)
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard != nil }
-        #expect(vm.progressCard != nil)
         #expect(vm.sessionKey == "global")
         #expect(vm.progressCard?.markdown == "research")
         #expect(await fetchedSessions.current() == ["research|global"])
         vm.syncActiveAgentId("main")
         #expect(vm.progressCard == nil)
         await waitForObservedState { vm.progressCard?.markdown == "main" }
-        #expect(vm.progressCard?.markdown == "main")
         #expect(await fetchedSessions.current() == ["research|global", "main|global"])
     }
 
@@ -2344,7 +2327,6 @@ struct ChatViewModelTests {
             progressCardStoreAvailable: true)
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.revision == 1 }
-        #expect(vm.progressCard?.revision == 1)
         #expect(vm.sessionKey == "agent:research:workbench")
         for owner in ["main", "research"] {
             await vm.handleTransportEvent(.progressCardChanged(ProgressCardChangedEvent(
@@ -2389,7 +2371,6 @@ struct ChatViewModelTests {
         vm.handleTransportEvent(.routeChanged)
         vm.handleTransportEvent(.health(ok: true))
         await waitForObservedState { vm.progressCard?.markdown == "Current gateway" }
-        #expect(vm.progressCard?.markdown == "Current gateway")
         #expect(vm.progressCardStoreAvailable == true)
         await oldCapability.release()
         await oldReplyReady.wait { $0 >= 1 }
@@ -2409,7 +2390,6 @@ struct ChatViewModelTests {
 
         try await loadAndWaitBootstrap(vm: vm)
         await waitForObservedState { vm.progressCard?.revision == 7 }
-        #expect(await MainActor.run { vm.progressCard?.revision == 7 })
 
         #expect(await fetchedSessions.current() == ["agent:main:main"])
     }
@@ -3659,7 +3639,6 @@ struct ChatViewModelTests {
 
         emitAssistantText(transport: transport, runId: "run-active", text: "newer partial")
         await waitForObservedState { vm.streamingAssistantText == "newer partial" }
-        #expect(vm.streamingAssistantText == "newer partial")
 
         _ = await completion.increment()
         await vm.handleTransportEvent(.chat(OpenClawChatEventPayload(
@@ -3980,7 +3959,6 @@ struct ChatViewModelTests {
         await send?.value
         #expect(!vm.isSending && vm.pendingRunCount == 1)
         await waitForObservedState { vm.sessionId == "sess-main-fallback" }
-        #expect(vm.sessionId == "sess-main-fallback")
         #expect(await MainActor.run { vm.pendingRunCount == 1 })
     }
 
@@ -4481,7 +4459,6 @@ struct ChatViewModelTests {
 
         emitAssistantText(transport: transport, runId: "run-active", text: "live newer")
         await waitForObservedState { vm.streamingAssistantText == "live newer" }
-        #expect(vm.streamingAssistantText == "live newer")
 
         await staleGate.release()
         await staleRefresh.value
@@ -4524,7 +4501,6 @@ struct ChatViewModelTests {
         #expect(await historyCalls.current() == 2)
         emitAssistantText(transport: transport, runId: "run-active", text: "live newer")
         await waitForObservedState { vm.streamingAssistantText == "live newer" }
-        #expect(vm.streamingAssistantText == "live newer")
 
         await staleGate.release()
         await staleRefresh.value
@@ -4685,7 +4661,6 @@ struct ChatViewModelTests {
 
         emitAssistantText(transport: transport, runId: "run-current", text: "current live")
         await waitForObservedState { vm.streamingAssistantText == "current live" }
-        #expect(vm.streamingAssistantText == "current live")
         #expect(await MainActor.run { vm.pendingRunCount } == 1)
     }
 
