@@ -51,6 +51,7 @@ export async function readSessionTranscriptAnchorsAsync(
     entryIds: [...selection.entryIds],
     afterSeq: selection.afterSeq,
     includeSession: selection.includeSession,
+    contextValidation: selection.contextValidation && structuredClone(selection.contextValidation),
   };
   signal?.throwIfAborted();
   if (

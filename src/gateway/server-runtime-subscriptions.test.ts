@@ -274,10 +274,11 @@ describe("startGatewayEventSubscriptions", () => {
   });
 
   registerActivitySummaryPublicationTests(
-    (projection) => {
+    (projection, signal) => {
       const params = createParams();
       unsubs = startGatewayEventSubscriptions({
         ...params,
+        signal: signal ?? params.signal,
         getSessionRowProjection: () => projection,
       });
       return { params, unsubs };
