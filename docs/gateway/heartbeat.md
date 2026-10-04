@@ -193,6 +193,12 @@ is an event, not a recurring check. Its owner submits a follow-up to the target
 session. Normal session admission prevents it from interrupting unrelated active
 work or arriving in a reset or replaced session.
 
+Each follow-up processes the event submitted by its owner. Scheduled checks
+include only deferred notices assigned to that job. Unrelated passive session
+notices remain queued for ordinary conversation turns; an immediate follow-up
+does not consume them. Put a scheduled check's required instructions in its
+job payload or scratch.
+
 Follow-ups for an internal conversation, such as Control UI or WebChat, remain
 in that conversation. A failed transcript publication does not redirect them
 to an automation's external delivery target or acknowledge them as delivered.

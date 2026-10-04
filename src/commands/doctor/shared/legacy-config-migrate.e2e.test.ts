@@ -149,7 +149,6 @@ describe("legacy config migration end to end", () => {
         ownership: "explicit",
         defaults: {
           systemAgent: { agentId: "main" },
-          heartbeat: { agentId: "main" },
         },
         entries: {
           main: { name: "first", workspace: resolveDefaultAgentWorkspaceDir() },
@@ -267,7 +266,7 @@ describe("legacy config migration end to end", () => {
     },
   );
 
-  it("canonicalizes a multi-family legacy config and is idempotent", () => {
+  it("canonicalizes a multi-family legacy config and is idempotent", async () => {
     const raw = {
       env: { shellEnv: { enabled: true }, API_ORIGIN: "https://example.test" },
       agents: {
@@ -344,9 +343,25 @@ describe("legacy config migration end to end", () => {
         },
       },
     };
-    const result = migrateLegacyConfig(raw, { sourceConfigBeforeMigrations: raw });
+    const { withOpenClawTestState } = await import("../../../test-utils/openclaw-test-state.js");
+    const { retireHeartbeatWithDoctor } = await import("../../doctor-heartbeat-retirement.js");
+    const { result, retired } = await withOpenClawTestState({}, async (state) => {
+      const sourceBefore = JSON.stringify(raw);
+      const result = migrateLegacyConfig(raw, { sourceConfigBeforeMigrations: raw });
+      expect(result.partiallyValid).toBe(true);
+      if (!result.config) {
+        throw new Error("Expected a migrated config awaiting durable heartbeat retirement.");
+      }
+      expect(result.config.channels?.defaults?.heartbeatVisibility).toEqual({ showOk: true });
+      const migratedBefore = JSON.stringify(result.config);
+      const retired = await retireHeartbeatWithDoctor(result.config, state.env);
+      expect(JSON.stringify(raw)).toBe(sourceBefore);
+      expect(JSON.stringify(result.config)).toBe(migratedBefore);
+      expect(retired).not.toHaveProperty("channels.defaults.heartbeatVisibility");
+      expect(await retireHeartbeatWithDoctor(retired, state.env)).toEqual(retired);
+      return { result, retired };
+    });
 
-    expect(result.partiallyValid).toBeUndefined();
     expect(result.config).toMatchObject({
       env: { shellEnv: { enabled: true }, vars: { API_ORIGIN: "https://example.test" } },
       agents: {
@@ -384,12 +399,12 @@ describe("legacy config migration end to end", () => {
     expect(result.changes).toContain(
       "Moved agents.defaults.promptOverlays.gpt5.personality → plugins.entries.openai.config.personality.",
     );
-    const validation = validateConfigObjectRaw(result.config);
+    const validation = validateConfigObjectRaw(retired);
     expect(validation.ok, validation.ok ? undefined : JSON.stringify(validation.issues)).toBe(true);
-    expect(
-      applyLegacyDoctorMigrations(result.config, { sourceConfigBeforeMigrations: result.config }),
-    ).toEqual({ next: null, changes: [] });
-    const serialized = JSON.stringify(result.config);
+    expect(applyLegacyDoctorMigrations(retired, { sourceConfigBeforeMigrations: retired })).toEqual(
+      { next: null, changes: [] },
+    );
+    const serialized = JSON.stringify(retired);
     for (const key of [
       "pdfMaxBytesMb",
       "timeoutSec",

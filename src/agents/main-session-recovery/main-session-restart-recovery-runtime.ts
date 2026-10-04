@@ -7,6 +7,7 @@ import {
 } from "../../infra/agent-events.js";
 import { sleepWithAbort } from "../../infra/backoff.js";
 import { runWithGatewayIndependentRootWorkAdmission } from "../../process/gateway-work-admission.js";
+import { getAgentDatabaseStartupAdmission } from "../../state/agent-database-startup.js";
 import { runWithMainSessionRecoveryAdmission } from "./main-session-recovery-admission.js";
 import { createMainSessionRecoveryCapacity } from "./main-session-recovery-capacity.js";
 import { getMainSessionRecoveryRetryCount } from "./main-session-recovery-state.js";
@@ -251,6 +252,7 @@ export function scheduleRestartAbortedMainSessionRecovery(params: {
     params.shouldContinue?.() !== false &&
     isAgentEventLifecycleGenerationCurrent(lifecycleGeneration);
   const startupRecoveryCutoffMs = Date.now();
+  let startupPreparation = getAgentDatabaseStartupAdmission()?.capturePreparationSettlement();
   const recoveryCapacity = createMainSessionRecoveryCapacity({
     limit: STARTUP_RECOVERY_MAX_ACTIVE_RUNS,
   });
@@ -342,7 +344,15 @@ export function scheduleRestartAbortedMainSessionRecovery(params: {
       signal: abortController.signal,
       attempt: async (finalAttempt) => {
         exhaustedTargets = new Map();
-        const result = await runRecoveryAttempt(exhaustedTargets);
+        let result = await runRecoveryAttempt(exhaustedTargets);
+        if (startupPreparation) {
+          await Promise.race([startupPreparation, waitForAbortSignal(abortController.signal)]);
+          startupPreparation = undefined;
+          if (!shouldContinue()) {
+            return true;
+          }
+          result = await runRecoveryAttempt(exhaustedTargets);
+        }
         if (result.failed === 0) {
           return true;
         }

@@ -65,7 +65,10 @@ type ClawAddApplyOptions = OpenClawStateDatabaseOptions & {
   installMcpServers?: typeof installClawMcpServers;
   installCronJobs?: typeof installClawCronJobs;
   seedPackageBootstrap?: typeof seedClawPackageBootstrap;
-  cronGateway?: Pick<ClawCronGateway, "add" | "list" | "waitUntilAgentAvailable">;
+  cronGateway?: Pick<
+    ClawCronGateway,
+    "add" | "get" | "list" | "waitUntilAgentAvailable" | "mutateAutomation"
+  >;
   nowMs?: number;
 };
 export class ClawAddMutationError extends Error {

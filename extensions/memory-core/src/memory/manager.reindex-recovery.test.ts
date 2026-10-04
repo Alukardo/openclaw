@@ -15,6 +15,7 @@ import { resolveRuntimeWorkerUrl } from "openclaw/plugin-sdk/process-runtime";
 import { resolveOpenClawAgentSqlitePath } from "openclaw/plugin-sdk/sqlite-runtime";
 import * as sqliteRuntime from "openclaw/plugin-sdk/sqlite-runtime";
 import {
+  closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
   closeOpenClawStateDatabaseAsync,
 } from "openclaw/plugin-sdk/sqlite-runtime-testing";
@@ -483,7 +484,7 @@ describe("memory manager reindex recovery", () => {
         throw new Error("fixture provider missing");
       }
       await fs.writeFile(path.join(memoryDir, "alpha.md"), "New reusable alpha memory.");
-      let replacementDb: DatabaseSync | undefined;
+      let closing: Promise<void> | undefined;
       vi.spyOn(harness.provider, "embedBatch").mockImplementationOnce(async (inputs) => {
         reservation = await reservePublishedWriter(() => {
           if (scenario === "purge") {
@@ -493,7 +494,8 @@ describe("memory manager reindex recovery", () => {
             });
           } else if (scenario === "replace") {
             closeOpenClawAgentDatabasesForTest();
-            replacementDb = sqliteRuntime.openOpenClawAgentDatabase({ agentId: "main" }).db;
+            closing = closeOpenClawAgentDatabasesAsync();
+            void closing.catch(() => undefined);
           }
         });
         return inputs.map(() => [0, 1, 0]);
@@ -510,13 +512,16 @@ describe("memory manager reindex recovery", () => {
             ? /^Agent database execution admission is closed$/
             : /Memory index changed/,
         );
-        expect(
-          (replacementDb ?? publishedDb).prepare("SELECT hash FROM memory_embedding_cache").all(),
-        ).toEqual([]);
+        await closing;
+        const currentDb =
+          scenario === "replace"
+            ? sqliteRuntime.openOpenClawAgentDatabase({ agentId: "main" }).db
+            : publishedDb;
+        expect(currentDb.prepare("SELECT hash FROM memory_embedding_cache").all()).toEqual([]);
       } finally {
         reservation?.release();
-        await reservation?.done;
-        await sync.catch(() => undefined);
+        await Promise.allSettled([reservation?.done, sync]);
+        await closing;
       }
     },
   );

@@ -170,7 +170,7 @@ describe("OutputAccumulator", () => {
            syncBuiltinESMExports();
          }`,
         {
-          imports: resolveRuntimeWorkerArgv(ownerUrl, resolveTestNodeExecPath()).slice(1, -1),
+          execArgv: resolveRuntimeWorkerArgv(ownerUrl, resolveTestNodeExecPath()).slice(0, -1),
           timeout: 20_000,
           maxBuffer: 64 * 1024,
           env: {

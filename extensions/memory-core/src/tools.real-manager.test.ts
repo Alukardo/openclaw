@@ -11,7 +11,10 @@ import {
   registerMemoryCorpusSupplement,
 } from "openclaw/plugin-sdk/memory-host-core";
 import { openOpenClawAgentDatabase } from "openclaw/plugin-sdk/sqlite-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawAgentDatabasesForTest,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readMemoryDatabaseRevision } from "./memory/manager-db-kernel.js";
 import * as generationLease from "./memory/manager-index-generation-lease.js";
@@ -570,14 +573,17 @@ describe("memory_search real manager", () => {
         1,
       );
     closeOpenClawAgentDatabasesForTest();
+    await closeOpenClawAgentDatabasesAsync();
 
     const tool = searchTool(cfg, { agentSessionKey: "agent:main:main" });
 
     const first = await tool.execute("migration-first", { query: "operator recovery" });
+    await closeOpenClawAgentDatabasesAsync();
     openOpenClawAgentDatabase({ agentId: "main" })
       .db.prepare("DELETE FROM session_nodes WHERE session_key = ?")
       .run("Agent:Main:Main");
     closeOpenClawAgentDatabasesForTest();
+    await closeOpenClawAgentDatabasesAsync();
     const replay = await tool.execute("migration-replay", {
       query: "different anti-cheat query",
     });

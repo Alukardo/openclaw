@@ -166,6 +166,12 @@ class AgentDatabaseStartupAdmission {
     );
   }
 
+  /** Join only work this startup already accepted, independently of later inspections. */
+  capturePreparationSettlement(): Promise<void> | undefined {
+    const accepted = [...this.work];
+    return accepted.length > 0 ? Promise.allSettled(accepted).then(() => undefined) : undefined;
+  }
+
   scheduling(
     env: NodeJS.ProcessEnv,
     runtimePaths: readonly string[],

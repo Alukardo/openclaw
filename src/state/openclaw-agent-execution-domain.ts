@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { isPromise } from "node:util/types";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { runSqliteReadOperationSync } from "../infra/sqlite-schema-facts.js";
 import {
   SQLITE_WORKER_PREPARE_COMMAND,
   type SqliteWorkerPreparedBackend,
@@ -99,19 +100,24 @@ export function createAgentDatabaseDomainOwner(context: {
     failedBinding = true;
     const authority = { active: true };
     try {
-      const backend = factory(input.input, {
-        databasePath: context.databasePath,
+      const backend = runSqliteReadOperationSync(
         database,
-        admit: (
-          stage: "transaction" | "commit",
-          requestAdmission?: AgentDatabaseAdmissionRestriction,
-        ) => {
-          if (!authority.active) {
-            throw new Error("Agent publication cleanup cannot admit a transaction");
-          }
-          context.admit(stage, requestAdmission);
-        },
-      });
+        () =>
+          factory(input.input, {
+            databasePath: context.databasePath,
+            database,
+            admit: (
+              stage: "transaction" | "commit",
+              requestAdmission?: AgentDatabaseAdmissionRestriction,
+            ) => {
+              if (!authority.active) {
+                throw new Error("Agent publication cleanup cannot admit a transaction");
+              }
+              context.admit(stage, requestAdmission);
+            },
+          }),
+        "fresh",
+      );
       if (isPromise(backend)) {
         void backend.catch(() => {});
         throw new Error("Connection-bound publication factories must remain synchronous");
