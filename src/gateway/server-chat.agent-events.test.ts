@@ -556,7 +556,7 @@ describe("agent event handler", () => {
     }
 
     expect(h.chat()).toHaveLength(1);
-    h.end("run-lazy-sanitize", deltas.length + 1);
+    await h.end("run-lazy-sanitize", deltas.length + 1);
 
     const payloads = h.chat().map(([, payload]) => payload) as Array<{
       state?: string;
@@ -615,7 +615,7 @@ describe("agent event handler", () => {
       await h.emit("run-retry", "assistant", { text: "I", delta: "I" }, { seq: 12 });
       vi.advanceTimersByTime(500);
       await h.emit("run-retry", "assistant", { text: "I agree", delta: " agree" }, { seq: 13 });
-      h.end("run-retry", 14);
+      await h.end("run-retry", 14);
       expect(h.chat().map(([, payload]) => payload.state)).toEqual([
         "status",
         "status",
@@ -740,7 +740,7 @@ describe("agent event handler", () => {
         await h.emit(run.runId, "item", answerCandidate("shared-item", expected, "selected"), {
           seq: 11,
         });
-        h.end(run.runId, 12);
+        await h.end(run.runId, 12);
         const chat = chatFor(run.clientRunId);
         expect(
           chat
@@ -830,7 +830,7 @@ describe("agent event handler", () => {
           .join(""),
       ).toBe("Hello");
 
-      h.end("run-candidate-boundary", 6);
+      await h.end("run-candidate-boundary", 6);
       const completedCalls = h.broadcast.mock.calls.length;
       vi.advanceTimersByTime(1_000);
       expect(h.broadcast).toHaveBeenCalledTimes(completedCalls);
@@ -914,7 +914,7 @@ describe("agent event handler", () => {
         answerCandidate("shared-item-id", "Beta tail", "selected"),
         { seq: 5 },
       );
-      h.end("run-candidate-sibling", 6);
+      await h.end("run-candidate-sibling", 6);
       expect(
         h
           .chat()
@@ -990,7 +990,7 @@ describe("agent event handler", () => {
     );
     expect(h.chat()).toHaveLength(0);
 
-    h.end("run-media-only", 2);
+    await h.end("run-media-only", 2);
     const payloads = h.chat().map(([, payload]) => payload) as Array<{
       state?: string;
       message?: unknown;
@@ -1019,7 +1019,7 @@ describe("agent event handler", () => {
         { seq: index + 1 },
       );
     }
-    h.end("run-split-media", 4);
+    await h.end("run-split-media", 4);
 
     const payloads = h.chat().map(([, payload]) => payload) as Array<{
       message?: { content?: Array<{ text?: string }> };
@@ -1041,7 +1041,7 @@ describe("agent event handler", () => {
     const h = createHarness({ now: 1_000 });
     h.registerNamed("ordinary-media");
     await h.emit("run-ordinary-media", "assistant", data);
-    h.end("run-ordinary-media", 2);
+    await h.end("run-ordinary-media", 2);
     expect(h.chat().at(-1)?.[1]).toMatchObject({
       state: "final",
       message: { content: [{ text: data.text }] },
@@ -1071,7 +1071,7 @@ describe("agent event handler", () => {
       { seq: 2 },
     );
     vi.advanceTimersByTime(flushMs);
-    h.end("run-control-replacement", 3);
+    await h.end("run-control-replacement", 3);
 
     const payloads = h.chat().map(([, payload]) => payload);
     expect(payloads).toMatchObject([
@@ -1089,7 +1089,7 @@ describe("agent event handler", () => {
     const h = createHarness({ now: 2_200 });
     h.registerNamed("4");
     await h.emit("run-4", "assistant", { text: "No" });
-    h.end("run-4");
+    await h.end("run-4");
     expect(h.chat()).toHaveLength(1);
     expect(h.chat()[0]?.[1]).toMatchObject({
       state: "final",
@@ -1109,7 +1109,7 @@ describe("agent event handler", () => {
       ["assistant", { text: "NO_REPLYThe user" }],
       ["assistant", { text: "NO_REPLYThe user is saying hello" }],
     ]);
-    h.end("run-4b");
+    await h.end("run-4b");
 
     const chatCalls = h.chat();
     const finalPayload = chatCalls.at(-1)?.[1] as {
@@ -1156,7 +1156,7 @@ describe("agent event handler", () => {
     await h.emit("run-final-flush", "assistant", first);
     h.nowSpy?.mockReturnValue(10_860);
     await h.emit("run-final-flush", "assistant", next, { seq: 2 });
-    h.end("run-final-flush", 3);
+    await h.end("run-final-flush", 3);
     const calls = h.chat();
     expect(calls).toHaveLength(3);
     expect(calls[1]?.[1]).toMatchObject({ state: "delta", ...delta });
@@ -1208,7 +1208,7 @@ describe("agent event handler", () => {
       { itemId: "message-2", text: "Hi", replace: true, replaceable: true },
       { seq: 2 },
     );
-    h.end("run-item-correction", 3);
+    await h.end("run-item-correction", 3);
 
     const final = { state: "final", message: { content: [{ type: "text", text: "Hi" }] } };
     expect(h.chat().at(-1)?.[1]).toMatchObject(final);
@@ -2796,7 +2796,7 @@ describe("agent event handler", () => {
     await h.emit("run-hidden", "assistant", {
       text: "visible only to the selected session",
     });
-    h.end("run-hidden", 2);
+    await h.end("run-hidden", 2);
 
     expect(h.chat()).toHaveLength(0);
     expect(h.nodeSendToSession).not.toHaveBeenCalled();
