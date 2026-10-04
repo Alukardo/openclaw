@@ -4068,7 +4068,6 @@ struct ChatViewModelTests {
 
         emitAssistantText(transport: transport, runId: runId, text: "local output")
         await waitForObservedState { vm.streamingAssistantText == "local output" }
-        #expect(await MainActor.run { vm.streamingAssistantText == "local output" })
     }
 
     @Test func `live chat delta owns run while bootstrap history is pending`() async throws {
@@ -4909,7 +4908,6 @@ struct ChatViewModelTests {
         emitAssistantText(transport: transport, runId: runId, text: "streaming…")
 
         await waitForObservedState { vm.streamingAssistantText == "streaming…" }
-        #expect(await MainActor.run { vm.streamingAssistantText == "streaming…" })
 
         emitToolStart(transport: transport, runId: runId)
 
@@ -5241,7 +5239,6 @@ struct ChatViewModelTests {
         transport.emit(.chat(final))
         transport.emit(.health(ok: false))
         await waitForObservedState { !vm.healthOK }
-        #expect(await MainActor.run { !vm.healthOK })
 
         #expect(await MainActor.run {
             vm.messages.count(where: { message in
@@ -5564,11 +5561,9 @@ struct ChatViewModelTests {
 
         emitAssistantText(transport: transport, runId: runId, text: "Here is the result so far")
         await waitForObservedState { vm.streamingAssistantText == "Here is the result so far" }
-        #expect(await MainActor.run { vm.streamingAssistantText == "Here is the result so far" })
         await historyGate.open()
         await send.value
         await waitForObservedState { vm.messages.contains { $0.content.first?.text == "Let me inspect it." } }
-        #expect(await MainActor.run { vm.messages.contains { $0.content.first?.text == "Let me inspect it." } })
 
         #expect(await MainActor.run { vm.pendingRunCount } == 1)
         #expect(await MainActor.run { vm.streamingAssistantText } == "Here is the result so far")
@@ -5823,15 +5818,6 @@ struct ChatViewModelTests {
                         message.content.contains { $0.text == "completed from lifecycle" }
                 }
         }
-        #expect(await MainActor.run {
-            vm.pendingRunCount == 0 &&
-                vm.streamingAssistantText == nil &&
-                vm.pendingToolCalls.isEmpty &&
-                vm.messages.contains { message in
-                    message.role == "assistant" &&
-                        message.content.contains { $0.text == "completed from lifecycle" }
-                }
-        })
     }
 
     @Test(arguments: ["final", "aborted", "error"])
@@ -6680,13 +6666,6 @@ struct ChatViewModelTests {
             return texts.contains(where: { $0.0 == "assistant" && $0.1 == "final answer" }) &&
                 texts.contains(where: { $0.0 == "user" && $0.1 == "hello from mac webchat" })
         }
-        #expect(await MainActor.run {
-            let texts = vm.messages.map { message in
-                (message.role, message.content.compactMap(\.text).joined(separator: "\n"))
-            }
-            return texts.contains(where: { $0.0 == "assistant" && $0.1 == "final answer" }) &&
-                texts.contains(where: { $0.0 == "user" && $0.1 == "hello from mac webchat" })
-        })
     }
 
     @Test func `keeps optimistic user message when final refresh history is temporarily empty`() async throws {
@@ -6709,12 +6688,6 @@ struct ChatViewModelTests {
                     message.content.compactMap(\.text).joined(separator: "\n") == "hello from mac webchat"
             }
         }
-        #expect(await MainActor.run {
-            vm.messages.contains { message in
-                message.role == "user" &&
-                    message.content.compactMap(\.text).joined(separator: "\n") == "hello from mac webchat"
-            }
-        })
     }
 
     @Test func `does not duplicate user message when refresh returns canonical timestamp`() async throws {
@@ -6925,13 +6898,6 @@ struct ChatViewModelTests {
                         message.content.compactMap(\.text).joined(separator: "\n") == "first answer"
                 }
         }
-        #expect(await MainActor.run {
-            vm.pendingRunCount == 0 &&
-                vm.messages.contains { message in
-                    message.role == "assistant" &&
-                        message.content.compactMap(\.text).joined(separator: "\n") == "first answer"
-                }
-        })
         try await sendMessageAndEmitFinal(
             transport: transport,
             vm: vm,
@@ -6991,14 +6957,6 @@ struct ChatViewModelTests {
                 !texts.contains("old question") &&
                 !texts.contains("old answer")
         }
-        #expect(await MainActor.run {
-            let texts = vm.messages.map { message in
-                message.content.compactMap(\.text).joined(separator: "\n")
-            }
-            return texts.contains("current answer") &&
-                !texts.contains("old question") &&
-                !texts.contains("old answer")
-        })
     }
 
     @Test @MainActor func `bounded repeated same text reply invalidates older stale refresh`() async throws {
@@ -11151,7 +11109,6 @@ struct ChatViewModelTests {
 
         emitExternalFinal(transport: transport, runId: "external-run", sessionKey: "main")
         await waitForObservedState { vm.sessionId == "sess-main-newer-empty-refresh" }
-        #expect(await MainActor.run { vm.sessionId == "sess-main-newer-empty-refresh" })
 
         await staleFallbackGate.release()
         await staleFallbackReleasedCount.wait { $0 >= 1 }
@@ -12097,7 +12054,6 @@ struct ChatViewModelTests {
         _ = try await sendMessageAndEmitFinal(transport: transport, vm: vm, text: "use Luna Max")
         #expect(await transport.sentThinkingLevels() == ["max"])
         await waitForObservedState { vm.pendingRunCount == 0 }
-        #expect(await MainActor.run { vm.pendingRunCount == 0 })
 
         await MainActor.run { vm.selectModel("openai/gpt-5.6-terra") }
         await vm.waitForPendingSessionSettings(in: "main")
