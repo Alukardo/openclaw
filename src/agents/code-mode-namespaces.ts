@@ -219,13 +219,6 @@ function toolIdentifiersForServer(
   return created;
 }
 
-type McpNamespaceModel = {
-  root: McpNamespaceScope;
-  calls: Map<string, McpNamespaceCall>;
-  docs: McpApiServerDoc[];
-  bindings: Map<string, CodeModeMcpCatalogBinding>;
-};
-
 type McpNamespaceServer = {
   key: string;
   serverName: string;
@@ -319,9 +312,7 @@ function createMcpNamespacePlan(catalog: readonly CodeModeNamespaceCatalogEntry[
   return { entries: mcpEntries, servers: namedServers, usedServerIdentifiers };
 }
 
-function createMcpNamespaceModel(
-  catalog: readonly CodeModeNamespaceCatalogEntry[],
-): McpNamespaceModel | undefined {
+function createMcpNamespaceModel(catalog: readonly CodeModeNamespaceCatalogEntry[]) {
   const plan = createMcpNamespacePlan(catalog);
   if (!plan) {
     return undefined;
