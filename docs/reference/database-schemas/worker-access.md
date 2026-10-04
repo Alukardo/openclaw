@@ -954,6 +954,21 @@ durability, or update migration changes.
 
 ## Carry facts, publish after commit
 
+Session observer admission, publication, terminal synthesis, and companion snapshots
+read through the existing Gateway session worker lookup. Each observation captures
+its configured and physical sources before queueing and fetches fresh rows at later
+authority boundaries. Events retain FIFO order; reset notifications immediately
+fence pending reads, and publication rechecks the current lifecycle and audience
+after preparation. Digest persistence uses the existing agent worker patch guard
+to recheck retained host authority during transaction validation and before commit.
+Gateway close rejects new observation work and joins accepted
+reads and digest persistence before closing database workers. Accepted persistence
+does not inherit scheduler cancellation, and failed write replies never authorize
+replay. The released synchronous observer methods remain deprecated SDK adapters;
+bundled callers use their awaited companions. Live reply-hook and channel verbosity
+callbacks likewise use fresh worker reads while retaining the released synchronous
+contracts. Schemas, retention, durability, and update behavior are unchanged.
+
 Reply dispatch prepares the machine-owned TTS preference path through the existing
 shared-state reader and carries it through eligibility checks, delivery callbacks,
 and prompt assembly. Missing state is a prepared fact, so later consumers do not

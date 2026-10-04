@@ -519,7 +519,7 @@ async function createCompanion(runModel?: SessionCompanionAskDeps["run"]) {
     scheduler: createTestGatewayScheduler(),
     getConfig: getRuntimeConfig,
     contextReader: defaultSessionCompanionContextReader,
-    sessionObserver: { getCompanionSnapshot: () => ({ agentId: "main", notes: [] }) },
+    sessionObserver: { getCompanionSnapshotAsync: async () => ({ agentId: "main", notes: [] }) },
     resolveUtilityModelRef: () => "openai/gpt-5.6-luna",
     run,
   });

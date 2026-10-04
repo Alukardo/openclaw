@@ -1,6 +1,11 @@
 import { settleProgressVisibilityCallbackResult } from "../../channels/progress-visibility.js";
 import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
 import { sessionPersonalProfileId } from "../../config/sessions/session-entry-provenance.js";
+import {
+  captureSessionEntryReadScope,
+  readSessionEntryReadOnlyInWorker,
+} from "../../config/sessions/session-entry-read-runtime.js";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isFastModeAutoProgressPayload } from "../reply-payload.js";
@@ -94,17 +99,26 @@ export async function executeFollowupTurn(params: {
   const isHeartbeat = false;
   const roomEvent = turn.queued.currentInboundEventKind === "room_event";
   const progressAllowed = () => turn.sendPolicy === "allow" && !roomEvent;
-  const currentVerboseLevel = (): VerboseLevel => {
+  const verboseReadScope =
+    turn.session.kind === "session" && turn.session.storePath
+      ? captureSessionEntryReadScope({
+          storePath: turn.session.storePath,
+          sessionKey: turn.session.key,
+        }).scope
+      : undefined;
+  const currentVerboseLevel = (prepared?: { entry: SessionEntry | undefined }): VerboseLevel => {
     if (turn.queued.run.verboseLevelOverride !== undefined) {
       return turn.queued.run.verboseLevelOverride;
     }
     const session = turn.session;
     if (session.kind === "session" && session.storePath) {
       try {
-        const loadedEntry = loadSessionEntryReadOnly({
-          storePath: session.storePath,
-          sessionKey: session.key,
-        });
+        const loadedEntry = prepared
+          ? prepared.entry
+          : loadSessionEntryReadOnly({
+              storePath: session.storePath,
+              sessionKey: session.key,
+            });
         const ownedEntry = session.current();
         const loadedGenerationMatches =
           loadedEntry !== undefined &&
@@ -142,11 +156,33 @@ export async function executeFollowupTurn(params: {
     progressAllowed() &&
     (shouldEmitStructuredProgress() || sourceOpts?.allowToolLifecycleWhenProgressHidden === true);
   const { commentaryPayloadsEnabled, draftOwnsCommentaryProgress } =
-    resolveTurnCommentaryProgressOwner({
+    await resolveTurnCommentaryProgressOwner({
       commentaryPayloadsEnabled: sourceOpts?.commentaryPayloadsEnabled === true,
       options: sourceOpts,
       resolveVerboseProgressVisibility: () => progressAllowed() && shouldEmitVerboseToolResult(),
+      resolveVerboseProgressVisibilityAsync: async () => {
+        const assertCurrent = () => {
+          turn.operation.abortSignal.throwIfAborted();
+          turn.queued.operatorAuthority?.assertCurrent();
+          if (turn.operation.result) {
+            throw new Error("Follow-up progress owner has settled");
+          }
+        };
+        assertCurrent();
+        let entry: SessionEntry | undefined;
+        if (verboseReadScope && turn.queued.run.verboseLevelOverride === undefined) {
+          try {
+            entry = await readSessionEntryReadOnlyInWorker(verboseReadScope, assertCurrent);
+          } catch {
+            // Match the existing maintenance fallback, but never swallow lost authority.
+          }
+        }
+        assertCurrent();
+        return progressAllowed() && currentVerboseLevel({ entry }) !== "off";
+      },
     });
+  turn.operation.abortSignal.throwIfAborted();
+  turn.queued.operatorAuthority?.assertCurrent();
   let progressChain: Promise<void> = Promise.resolve();
   let visibleReplyDelivered = false;
   let pendingProgressTaskFailure: unknown;

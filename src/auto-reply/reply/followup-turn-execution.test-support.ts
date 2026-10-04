@@ -5,6 +5,7 @@ import { createMockReplyOperation } from "./test-helpers.js";
 const followupTurnTestState = vi.hoisted(() => ({
   execute: vi.fn(),
   loadEntryReadOnly: vi.fn(),
+  readEntryInWorker: vi.fn(),
 }));
 
 vi.mock("./agent-runner-execution.js", () => ({
@@ -24,6 +25,12 @@ vi.mock("../../config/sessions/session-accessor.js", async () => {
       followupTurnTestState.loadEntryReadOnly(...args),
   };
 });
+
+vi.mock("../../config/sessions/session-entry-read-runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../config/sessions/session-entry-read-runtime.js")>()),
+  readSessionEntryReadOnlyInWorker: (...args: unknown[]) =>
+    followupTurnTestState.readEntryInWorker(...args),
+}));
 
 const { executeFollowupTurn } = await import("./followup-turn-execution.js");
 
@@ -96,6 +103,7 @@ export function createFollowupTurnTestTurn(
 export function resetFollowupTurnTestState() {
   vi.clearAllMocks();
   followupTurnTestState.loadEntryReadOnly.mockReturnValue(undefined);
+  followupTurnTestState.readEntryInWorker.mockResolvedValue(undefined);
   followupTurnTestState.execute.mockResolvedValue({
     runId: "run-1",
     outcome: { kind: "rejected", payload: { text: "done" } },
