@@ -16,6 +16,7 @@ import type { SessionEntry } from "../../config/sessions.js";
 import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
 import type { TypingMode } from "../../config/types.js";
 import { logVerbose } from "../../globals.js";
+import { isRestartRecoveryClaimChangedError } from "../../infra/agent-lifecycle-error.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { sessionDeliveryChannel } from "../../utils/delivery-context.read.js";
@@ -380,6 +381,14 @@ export async function handleReplyAgentRunError(
       error instanceof GatewayDrainingError ? "gateway_draining" : "command_lane_cleared",
       error,
     );
+    return returnWithQueuedFollowupDrain(
+      markReplyPayloadForSourceSuppressionDelivery({
+        text: buildRestartLifecycleReplyText(),
+      }),
+    );
+  }
+  if (isRestartRecoveryClaimChangedError(error)) {
+    replyOperation.fail("run_failed", error);
     return returnWithQueuedFollowupDrain(
       markReplyPayloadForSourceSuppressionDelivery({
         text: buildRestartLifecycleReplyText(),
