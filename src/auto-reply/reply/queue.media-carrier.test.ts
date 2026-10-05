@@ -28,6 +28,7 @@ import { enqueueFollowupRun, FollowupRunDeferredError, scheduleFollowupDrain } f
 import { createQueueTestRun, installQueueRuntimeErrorSilencer } from "./queue.test-helpers.js";
 import { clearFollowupQueue } from "./queue/state.js";
 import { createReplyOperation } from "./reply-run-registry.js";
+import { prepareReplyToolAuthority } from "./reply-tool-authority.js";
 import { createMockTypingController } from "./test-helpers.js";
 import { createTypingSignaler } from "./typing-mode.js";
 const queueKeys = new Set<string>();
@@ -83,17 +84,15 @@ describe("followup prompt metadata carrier", () => {
       sessionId: run.run.sessionId,
       resetTriggered: false,
     });
-    operation.bindToolAuthoritySnapshot({
-      fingerprint: () => "media-authority",
-      project: () => "media-authority",
-    });
+    await operation.bindToolAuthoritySnapshotAsync(prepareReplyToolAuthority(run));
+    const toolAuthorityFingerprint = await operation.bindToolAuthorityRouteAsync(run.run);
     const reject = vi.fn(async () => {
       throw new Error("no active turn to steer");
     });
     operation.attachBackend({
       kind: "embedded",
       supportsQueueMessageImages: true,
-      toolAuthorityFingerprint: "media-authority",
+      toolAuthorityFingerprint,
       cancel: vi.fn(),
       messageInjection: { isAvailable: () => true, queueMessage: reject },
     });
@@ -120,7 +119,7 @@ describe("followup prompt metadata carrier", () => {
           touchActiveSessionEntry: async () => {},
           typing,
           typingSignals: createTypingSignaler({ typing, mode: "never", isHeartbeat: false }),
-          toolAuthorityFingerprint: "media-authority",
+          toolAuthorityFingerprint,
         }),
       ).resolves.toBe("handled");
       expect(reject).toHaveBeenCalledOnce();

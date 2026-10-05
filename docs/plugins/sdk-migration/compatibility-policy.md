@@ -173,6 +173,8 @@ the optional awaited queue companion described in
 [awaited reply tool authority](/plugins/sdk-migration/how-to-migrate#await-reply-tool-authority).
 Legacy external V2 injection backends retain fresh native policy checks; an earlier
 prepared fingerprint never replaces current authority.
+Legacy V1 backends retain unbound run-owned input; caller-bound input still
+requires V2. Worker preparation does not change that distinction.
 Question claims and cancellation retain their existing synchronous contracts.
 Native session binding authorities retain their original `withCurrent` contract.
 The optional `withPreparedCurrent` companion composes fresh tool policy with native

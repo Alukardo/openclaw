@@ -243,9 +243,7 @@ export function createEmbeddedMessageInjectionQueue(consume: EmbeddedInjectionTa
         ACTIVE_EMBEDDED_RUNS.get(sessionId) === handle &&
         (!handle ||
           (ACTIVE_EMBEDDED_RUN_REGISTRATIONS.get(handle) === registration &&
-            handle.runId === runId &&
-            !handle.isStopped?.() &&
-            !handle.isAborted?.()))
+            handle.runId === runId))
       );
     });
     const admitted = (release: () => void) =>

@@ -28,6 +28,7 @@ import {
 import { withQuestionCreator } from "./reply-run-question.test-support.js";
 import type { ReplyBackendQueueMessageResult } from "./reply-run-registry.contracts.js";
 import { replyRunRegistry } from "./reply-run-registry.js";
+import { resolveFollowupRunToolAuthorityFingerprintAsync } from "./reply-tool-authority.js";
 import { createMockTypingController } from "./test-helpers.js";
 import { createTypingSignaler } from "./typing-mode.js";
 
@@ -647,13 +648,24 @@ describe("question response custody through reply adoption", () => {
           const state: ReplyOperationRunState = {};
           const followup = vi.fn(async (_run: FollowupRun) => {});
           const typing = createMockTypingController();
+          const incomingRun =
+            entrypoint === "steer" && mode === "legacy-receipt"
+              ? { ...run, run: { ...run.run, model: "different-incoming-model" } }
+              : run;
+          const incomingFingerprint =
+            incomingRun === run
+              ? fingerprint
+              : await resolveFollowupRunToolAuthorityFingerprintAsync(incomingRun);
+          if (incomingRun !== run) {
+            expect(incomingFingerprint).not.toBe(fingerprint);
+          }
           let done = false;
           const adoption = (
             entrypoint === "reply"
               ? runReplyAgent({
                   commandBody: text,
                   transcriptCommandBody: text,
-                  followupRun: run,
+                  followupRun: incomingRun,
                   opts: {
                     [REPLY_OPERATION_RUN_STATE]: state,
                     turnAdoptionLifecycle: run.turnAdoptionLifecycle,
@@ -675,7 +687,7 @@ describe("question response custody through reply adoption", () => {
                   typingMode: "never",
                 })
               : runActiveReplySteer({
-                  followupRun: run,
+                  followupRun: incomingRun,
                   opts: undefined,
                   providedReplyOperation: operation,
                   queueKey: key,
@@ -693,8 +705,7 @@ describe("question response custody through reply adoption", () => {
                     mode: "never",
                     isHeartbeat: false,
                   }),
-                  toolAuthorityFingerprint:
-                    mode === "legacy-receipt" ? "incoming-authority" : fingerprint,
+                  toolAuthorityFingerprint: incomingFingerprint,
                   ...(mode === "legacy-receipt"
                     ? { pendingInputAuthorityFingerprint: fingerprint }
                     : {}),

@@ -155,80 +155,84 @@ it.each(["worker", "compatibility"] as const)(
   },
 );
 
-it.each(["source-only", "with-overlay", "separate-caller", "legacy"] as const)(
-  "keeps every supplied authority through final admission: %s",
-  async (kind) => {
-    const operation = createTestReplyOperation();
-    operation.bindToolAuthoritySnapshot({ fingerprint: () => "policy", project: () => "policy" });
-    operation.bindToolAuthorityRoute({ provider: "test", model: "test" });
-    const entered = createDeferred();
-    const resume = createDeferred();
-    const effect = vi.fn(async () => {});
-    const source = { current: true };
-    const assertSource = () => {
-      if (!source.current) {
-        throw new Error("source owner revoked");
-      }
-    };
-    operation.attachBackend({
-      kind: "embedded",
-      cancel() {},
-      toolAuthorityFingerprint: "policy",
-      ...(kind === "legacy"
-        ? { messageInjection: { isAvailable: () => true, queueMessage: effect } }
-        : {
-            messageInjectionV2: {
-              version: 2,
-              isAvailable: () => true,
-              queueMessage: effect,
-              queueMessageAsync: async (_text, _options, preparation) => {
-                entered.resolve();
-                await resume.promise;
-                preparation.assertCurrent();
-                await effect();
-              },
-            } satisfies ReplyBackendMessageInjectionV2,
-          }),
-    });
-    operation.setPhase("running");
-    const attempt = await beginReplyMessageInjectionTarget(
-      replyRunRegistry.resolveCurrentMessageInjectionTarget(operation.key)!,
-      "retained source",
-      {
-        isInboundUserMessage: true,
-        toolAuthorityFingerprint: "policy",
-        ...(kind === "with-overlay" ? { toolAuthorityOverlay: overlay } : {}),
-        assertCurrent: kind === "separate-caller" ? assertSource : undefined,
-        toolAuthorityPreparation: {
-          assertCurrent: kind === "separate-caller" ? () => {} : assertSource,
-          async prepareCurrent() {},
-          compatAssertCurrent: assertSource,
-        },
-      },
-    );
-    try {
-      if (kind !== "legacy") {
-        await awaitGateBeforeSettlement(
-          entered.promise,
-          attempt.outcome,
-          "Prepared backend was not reached",
-        );
-        source.current = false;
-        resume.resolve();
-      }
-      await expect(attempt.outcome).resolves.toMatchObject(
-        kind === "legacy"
-          ? { status: "rejected", reason: "injection_unavailable" }
-          : { status: "failed" },
-      );
-      await expect(attempt.acceptance).resolves.toBe(false);
-      expect(effect).not.toHaveBeenCalled();
-    } finally {
-      resume.resolve();
-      await attempt.outcome;
+it.each([
+  "source-only",
+  "with-overlay",
+  "separate-caller",
+  "legacy",
+  "legacy-run-with-caller",
+] as const)("keeps every supplied authority through final admission: %s", async (kind) => {
+  const operation = createTestReplyOperation();
+  operation.bindToolAuthoritySnapshot({ fingerprint: () => "policy", project: () => "policy" });
+  operation.bindToolAuthorityRoute({ provider: "test", model: "test" });
+  const entered = createDeferred();
+  const resume = createDeferred();
+  const effect = vi.fn(async () => {});
+  const source = { current: true };
+  const legacy = kind === "legacy" || kind === "legacy-run-with-caller";
+  const separateCaller = kind === "separate-caller" || kind === "legacy-run-with-caller";
+  const assertSource = () => {
+    if (!source.current) {
+      throw new Error("source owner revoked");
     }
-  },
-);
+  };
+  operation.attachBackend({
+    kind: "embedded",
+    cancel() {},
+    toolAuthorityFingerprint: "policy",
+    ...(legacy
+      ? { messageInjection: { isAvailable: () => true, queueMessage: effect } }
+      : {
+          messageInjectionV2: {
+            version: 2,
+            isAvailable: () => true,
+            queueMessage: effect,
+            queueMessageAsync: async (_text, _options, preparation) => {
+              entered.resolve();
+              await resume.promise;
+              preparation.assertCurrent();
+              await effect();
+            },
+          } satisfies ReplyBackendMessageInjectionV2,
+        }),
+  });
+  operation.setPhase("running");
+  const attempt = await beginReplyMessageInjectionTarget(
+    replyRunRegistry.resolveCurrentMessageInjectionTarget(operation.key)!,
+    "retained source",
+    {
+      isInboundUserMessage: true,
+      toolAuthorityFingerprint: "policy",
+      ...(kind === "with-overlay" ? { toolAuthorityOverlay: overlay } : {}),
+      assertCurrent: separateCaller ? assertSource : undefined,
+      toolAuthorityPreparation: {
+        ...(kind === "legacy-run-with-caller" ? { authorityKind: "run" as const } : {}),
+        assertCurrent: separateCaller ? () => {} : assertSource,
+        async prepareCurrent() {},
+        compatAssertCurrent: assertSource,
+      },
+    },
+  );
+  try {
+    if (!legacy) {
+      await awaitGateBeforeSettlement(
+        entered.promise,
+        attempt.outcome,
+        "Prepared backend was not reached",
+      );
+      source.current = false;
+      resume.resolve();
+    }
+    await expect(attempt.outcome).resolves.toMatchObject(
+      legacy ? { status: "rejected", reason: "injection_unavailable" } : { status: "failed" },
+    );
+    await expect(attempt.acceptance).resolves.toBe(false);
+    expect(effect).not.toHaveBeenCalled();
+  } finally {
+    resume.resolve();
+    await attempt.outcome;
+  }
+});
 
 it("keeps callback acceptance authoritative over later queue rejection", async () => {
   const delivery = createDeferred();

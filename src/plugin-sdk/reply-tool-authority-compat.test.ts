@@ -8,6 +8,7 @@ import type {
   NativeSessionBindingAuthority,
   NativeSessionBindingWithCurrent,
 } from "openclaw/plugin-sdk/agent-harness-session-runtime";
+import type { controlRealtimeVoiceAgentRun } from "openclaw/plugin-sdk/realtime-voice";
 import { expectTypeOf, it } from "vitest";
 
 type Operation = NonNullable<EmbeddedRunAttemptParamsV2["replyOperation"]>;
@@ -106,4 +107,20 @@ it("keeps native withCurrent implementations valid alongside optional policy com
       preparations: readonly (Preparation & { onRefused?: (error: unknown) => "discarded" })[],
     ) => Promise<T>
   >();
+});
+
+it("accepts released realtime voice guarded queue adapters without preparation options", () => {
+  type Dependencies = NonNullable<Parameters<typeof controlRealtimeVoiceAgentRun>[1]>;
+  type Queue = NonNullable<Dependencies["queueGuardedEmbeddedAgentMessageWithOutcomeAsync"]>;
+  type ReleasedOptions = Omit<
+    NonNullable<Parameters<Queue>[2]>,
+    "canAdmit" | "toolAuthorityPreparation"
+  >;
+  type ReleasedQueue = (
+    sessionId: string,
+    text: string,
+    options: ReleasedOptions | undefined,
+    canInject: () => boolean,
+  ) => ReturnType<Queue>;
+  expectTypeOf<ReleasedQueue>().toExtend<Queue>();
 });

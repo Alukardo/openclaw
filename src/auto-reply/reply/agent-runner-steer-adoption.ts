@@ -207,11 +207,15 @@ export async function runActiveReplySteer(
     const text = followupRun.prompt;
     const compatAssertCurrent = () =>
       assertPolicy(resolveFollowupRunToolAuthorityFingerprint(followupRun, automaticFallbackRoute));
+    const sourceBound = Boolean(
+      automaticFallbackRoute || followupRun.operatorAuthority || followupRun.abortSignal,
+    );
     const injectionAttempt = await beginReplyMessageInjectionTarget(injectionTarget, text, {
       currentInboundContext: followupRun.currentInboundContext,
       inboundAudio: followupRun.currentInboundAudio === true,
-      assertCurrent: assertSourceCurrent,
+      assertCurrent: sourceBound ? assertSourceCurrent : undefined,
       toolAuthorityPreparation: bindWorkerToolPreparation({
+        authorityKind: sourceBound ? ("source-bound" as const) : ("run" as const),
         assertCurrent: assertSourceCurrent,
         compatAssertCurrent,
         prepareCurrent: async () =>

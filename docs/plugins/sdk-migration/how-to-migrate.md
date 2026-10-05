@@ -119,6 +119,11 @@ preparation after any further wait before that effect. The host selects the
 awaited companion when supplied; legacy external V2 implementations retain the
 native synchronous authority assertion.
 
+Legacy V1 backends still accept run-owned input without a separate caller-lifetime
+binding. Worker policy preparation alone does not create that binding. Input
+bound to a caller, operator, or source still requires V2; the host checks current
+owner and policy authority before invoking an unbound legacy backend.
+
 Native harness backends that await session-lineage admission can use the optional
 `NativeSessionBindingAuthority.withPreparedCurrent(consume, preparations)` companion.
 It reads tool policy and lineage together through the existing session reader,

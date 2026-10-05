@@ -60,7 +60,10 @@ export type ReplyBackendQueueMessageOptions = {
 export type ReplyMessageInjectionOptions = ReplyBackendQueueMessageOptions & {
   /** Host admission after policy preparation; false leaves the input for follow-up. */
   canAdmit?: () => boolean;
-  toolAuthorityPreparation?: ReplyToolAuthorityPreparation;
+  toolAuthorityPreparation?: ReplyToolAuthorityPreparation & {
+    /** Host policy preparation alone does not add a caller-lifetime binding. */
+    authorityKind?: "run" | "source-bound";
+  };
   /** Host-observed audio fact; an owner must preserve its dynamic tool context before accepting. */
   inboundAudio?: boolean;
   /** User-authorized controls retain sender authority but are not answers to pending questions. */

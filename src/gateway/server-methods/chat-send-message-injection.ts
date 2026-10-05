@@ -193,7 +193,7 @@ export function createChatSendMessageInjectionStarter(params: {
           admissionRefused = !canAdmit();
           return !admissionRefused;
         },
-        assertCurrent,
+        assertCurrent: params.assertCurrent || params.operatorAuthority ? assertCurrent : undefined,
         inboundAudio: hasInboundAudio(ctx),
         steeringMode: "all",
         isInboundUserMessage: true,

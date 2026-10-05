@@ -106,8 +106,8 @@ function resolveReplyBackendMessageInjection(
       Pick<ReplyBackendHandle, "claimPendingUserInputAnswer" | "cancelPendingUserInput">)
   | undefined {
   const guarded = backend.messageInjectionV2;
+  const assertCurrent = createMessageInjectionAuthority(canInject);
   if (guarded?.version === 2) {
-    const assertCurrent = createMessageInjectionAuthority(canInject);
     const authorityKind = sourceBound ? "source-bound" : "run";
     return {
       isAvailable: () => guarded.isAvailable(),
@@ -130,14 +130,17 @@ function resolveReplyBackendMessageInjection(
     };
   }
   if (sourceBound) {
-    createMessageInjectionAuthority(canInject)();
+    assertCurrent();
     return undefined;
   }
   if (backend.messageInjection) {
     const injection = backend.messageInjection;
     return {
       isAvailable: () => injection.isAvailable(),
-      queueMessage: (text, options) => injection.queueMessage(text, options),
+      queueMessage: (text, options) => {
+        assertCurrent();
+        return injection.queueMessage(text, options);
+      },
       claimPendingUserInputAnswer: backend.claimPendingUserInputAnswer?.bind(backend),
       cancelPendingUserInput: backend.cancelPendingUserInput?.bind(backend),
     };
@@ -154,8 +157,10 @@ function resolveReplyBackendMessageInjection(
       // unrelated token-stream state.
       return !backend.isStopped?.();
     },
-    queueMessage: (text, options) =>
-      options ? backend.queueMessage!(text, options) : backend.queueMessage!(text),
+    queueMessage: (text, options) => {
+      assertCurrent();
+      return options ? backend.queueMessage!(text, options) : backend.queueMessage!(text);
+    },
   };
 }
 
@@ -393,6 +398,9 @@ async function beginPreparedReplyMessageInjectionTarget(
           assertCurrent?.();
         }
       : undefined;
+  const sourceBound =
+    assertCurrent !== undefined ||
+    (toolAuthorityPreparation !== undefined && toolAuthorityPreparation.authorityKind !== "run");
   assertSourceCurrent?.();
   const assertPolicy = (projected: string | undefined) => {
     assertSourceCurrent?.();
@@ -417,7 +425,7 @@ async function beginPreparedReplyMessageInjectionTarget(
           inboundAudio,
           allowPendingUserInputAnswer,
           // An overlay alone does not add a caller lifetime binding to legacy input.
-          assertCurrent: toolAuthorityPreparation ? assertSourceCurrent : assertCurrent,
+          assertCurrent: sourceBound ? assertSourceCurrent : undefined,
           preparation: toolAuthorityOverlay
             ? bindWorkerToolPreparation(
                 {
