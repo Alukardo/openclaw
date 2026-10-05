@@ -457,6 +457,7 @@ describe("session list requests", () => {
       ...options,
       rowMode: "compact",
       source: "chat-pane",
+      excludeDock: true,
       configuredAgentsOnly: true,
       spawnedBy: "agent:main:parent",
     });
@@ -485,6 +486,7 @@ describe("session list requests", () => {
     expect(request).toHaveBeenCalledWith("sessions.list", {
       rowMode: "compact",
       source: "chat-pane",
+      excludeDock: true,
       configuredAgentsOnly: true,
       boardFace: "dashboard",
       includeGlobal: true,
@@ -782,6 +784,7 @@ describe("session list requests", () => {
     expect(request.mock.calls[0]?.[1]).toEqual({
       rowMode: "compact",
       source: "chat-pane",
+      excludeDock: true,
       includeGlobal: true,
       includeUnknown: true,
       configuredAgentsOnly: true,
@@ -828,6 +831,7 @@ describe("session list requests", () => {
     expect(request.mock.calls[1]?.[1]).toEqual({
       rowMode: "compact",
       source: "chat-pane",
+      excludeDock: true,
       agentId: "main",
       configuredAgentsOnly: true,
       includeGlobal: true,
