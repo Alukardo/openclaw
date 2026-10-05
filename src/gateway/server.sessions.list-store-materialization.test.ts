@@ -10,8 +10,8 @@ import * as sessionAccessor from "../config/sessions/session-accessor.js";
 import * as sessionEntryStatus from "../config/sessions/session-accessor.sqlite-status.js";
 import { resolveSqliteTargetFromSessionStorePath } from "../config/sessions/session-sqlite-target.js";
 import * as transcriptWorker from "../config/sessions/session-transcript-worker-runtime.js";
+import { withOpenClawAgentDatabaseWrite } from "../state/openclaw-agent-db-write.js";
 import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
-import { runOpenClawAgentWriteAdmission } from "../state/openclaw-agent-write-admission.js";
 import { observeSessionRowBackfill } from "./session-row-backfill.test-support.js";
 import { bindSessionRowProjection } from "./session-row-projection-access.js";
 import { createSessionRowProjection } from "./session-row-projection.js";
@@ -225,13 +225,17 @@ test("sessions.list projects out prompt snapshots without changing full entry re
     expect(resident?.storedEntry?.systemPromptReport).toBeUndefined();
 
     // Warm readers tolerate malformed raw edits; new readers must refuse them during admission.
-    await runOpenClawAgentWriteAdmission({ agentId: database.agentId, path: database.path }, () => {
-      database.db
-        .prepare(
-          "INSERT INTO session_nodes (session_key, current_session_id, entry_json, updated_at) VALUES (?, ?, ?, ?)",
-        )
-        .run("agent:main:zz-malformed", "malformed", "{", Date.now());
-    });
+    await withOpenClawAgentDatabaseWrite(
+      { agentId: database.agentId, path: database.path },
+      (current) => {
+        current.db
+          .prepare(
+            "INSERT INTO session_nodes (session_key, current_session_id, entry_json, updated_at) VALUES (?, ?, ?, ?)",
+          )
+          .run("agent:main:zz-malformed", "malformed", "{", Date.now());
+      },
+      database.db,
+    );
     reads = trackSqliteStatementExecutions(database.db, ["sessionStore"], () => "sessionStore");
     decode.mockClear();
 
