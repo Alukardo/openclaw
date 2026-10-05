@@ -74,7 +74,7 @@ it.each(["rewrite", "close"] as const)(
       await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 42 });
       await replaceTranscriptEvents(scope, [header]);
       const createReaders = historyReaders.createSessionHistoryWorkerReaders;
-      let closing: Promise<void> | undefined;
+      let closing: ReturnType<typeof closeOpenClawAgentDatabaseByPathAsync> | undefined;
       let intercepted = false;
       const spy = vi
         .spyOn(historyReaders, "createSessionHistoryWorkerReaders")
