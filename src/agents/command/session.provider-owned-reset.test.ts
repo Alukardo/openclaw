@@ -57,11 +57,11 @@ describe("command resolveSession provider-owned daily reset", () => {
     hoisted.terminalTranscriptNewer = false;
   });
 
-  it("keeps a provider-owned CLI session with the default reset policy", () => {
+  it("keeps a provider-owned CLI session with the default reset policy", async () => {
     const sessionKey = "agent:main:cli";
     seedProviderOwned(sessionKey);
 
-    const result = resolveSession({
+    const result = await resolveSession({
       cfg: { session: {} } as OpenClawConfig,
       sessionKey,
       agentId: "main",
@@ -71,7 +71,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     expect(result.sessionId).toBe("old-session-id");
   });
 
-  it("still rotates a non-provider-owned session across the daily boundary", () => {
+  it("still rotates a non-provider-owned session across the daily boundary", async () => {
     const sessionKey = "agent:main:cli";
     const startedAt = Date.now() - DAY_MS;
     hoisted.store = {
@@ -87,7 +87,7 @@ describe("command resolveSession provider-owned daily reset", () => {
       },
     };
 
-    const result = resolveSession({
+    const result = await resolveSession({
       cfg: { session: { reset: { mode: "daily" } } } as OpenClawConfig,
       sessionKey,
       agentId: "main",
@@ -99,7 +99,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     expect(result.sessionEntry?.lastRunId).toBeUndefined();
   });
 
-  it("keeps a model-locked session across the daily boundary", () => {
+  it("keeps a model-locked session across the daily boundary", async () => {
     const sessionKey = "agent:main:codex-supervised";
     const startedAt = Date.now() - DAY_MS;
     hoisted.store = {
@@ -114,7 +114,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     };
     hoisted.terminalTranscriptNewer = true;
 
-    const result = resolveSession({
+    const result = await resolveSession({
       cfg: { session: {} } as OpenClawConfig,
       sessionKey,
       agentId: "main",
@@ -124,7 +124,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     expect(result.sessionId).toBe("locked-session-id");
   });
 
-  it("carries stored thinking and verbose preferences during terminal transcript recovery", () => {
+  it("carries stored thinking and verbose preferences during terminal transcript recovery", async () => {
     const sessionKey = "agent:main:cli";
     const now = Date.now();
     hoisted.store = {
@@ -139,7 +139,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     };
     hoisted.terminalTranscriptNewer = true;
 
-    const result = resolveSession({
+    const result = await resolveSession({
       cfg: { session: {} } as OpenClawConfig,
       sessionKey,
       agentId: "main",
@@ -151,7 +151,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     expect(result.persistedVerbose).toBe("full");
   });
 
-  it("carries preferences across a daily reset", () => {
+  it("carries preferences across a daily reset", async () => {
     const sessionKey = "agent:main:cli";
     const startedAt = Date.now() - 2 * DAY_MS;
     hoisted.store = {
@@ -164,7 +164,7 @@ describe("command resolveSession provider-owned daily reset", () => {
         verboseLevel: "full",
       },
     };
-    const result = resolveSession({
+    const result = await resolveSession({
       cfg: { session: { reset: { mode: "daily" } } } as OpenClawConfig,
       sessionKey,
       agentId: "main",
@@ -176,7 +176,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     expect(result.persistedVerbose).toBe("full");
   });
 
-  it("carries preferences when terminal recovery overlaps an idle reset", () => {
+  it("carries preferences when terminal recovery overlaps an idle reset", async () => {
     const sessionKey = "agent:main:cli";
     const now = Date.now();
     const lastInteractionAt = now - 60 * 60 * 1000;
@@ -192,7 +192,7 @@ describe("command resolveSession provider-owned daily reset", () => {
     };
     hoisted.terminalTranscriptNewer = true;
 
-    const result = resolveSession({
+    const result = await resolveSession({
       cfg: {
         session: {
           reset: { mode: "idle", idleMinutes: 30 },
