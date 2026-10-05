@@ -339,11 +339,11 @@ describe("executeFollowupTurn", () => {
         opts: {
           onVerboseProgressVisibility: legacy,
           onVerboseProgressVisibilityAsync: async (isActive) => {
-            state.readEntryInWorker.mockResolvedValue(entry);
+            state.readEntry.mockResolvedValue(entry);
             expect(await isActive()).toBe(false);
-            state.readEntryInWorker.mockResolvedValue({ ...entry, verboseLevel: "full" });
+            state.readEntry.mockResolvedValue({ ...entry, verboseLevel: "full" });
             expect(await isActive()).toBe(true);
-            state.readEntryInWorker.mockResolvedValue({
+            state.readEntry.mockResolvedValue({
               ...entry,
               lifecycleRevision: "replacement",
               verboseLevel: "full",
@@ -369,7 +369,7 @@ describe("executeFollowupTurn", () => {
       key: "main",
       storePath: "/tmp/sessions.json",
     };
-    state.readEntryInWorker.mockImplementation(() => {
+    state.readEntry.mockImplementation(() => {
       entered.resolve();
       return pending.promise;
     });

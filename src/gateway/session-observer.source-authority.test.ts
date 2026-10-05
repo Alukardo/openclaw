@@ -12,7 +12,7 @@ import {
 } from "./session-observer.test-utils.js";
 
 it.for(["model", "failed model", "synthesized terminal"] as const)(
-  "rechecks physical source authority in the consuming frame for a %s digest",
+  "rechecks physical source authority before consuming a %s digest",
   async (kind, { signal }) => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const config: OpenClawConfig = {
@@ -31,17 +31,14 @@ it.for(["model", "failed model", "synthesized terminal"] as const)(
         .spyOn(observerWork, "createSessionObserverWork")
         .mockImplementation((params) => {
           const work = createWork(params);
-          const readCurrent = work.readCurrent.bind(work);
-          vi.spyOn(work, "readCurrent").mockImplementation(async (...args) => {
-            const session = await readCurrent(...args);
+          const withCurrent = work.withCurrent.bind(work);
+          vi.spyOn(work, "withCurrent").mockImplementation((...args) => {
             if (changeSourceOnRead) {
               changeSourceOnRead = false;
-              queueMicrotask(() => {
-                config.session = { store: replacementStore };
-                sourceChanges += 1;
-              });
+              config.session = { store: replacementStore };
+              sourceChanges += 1;
             }
-            return session;
+            return withCurrent(...args);
           });
           const background = work.background.bind(work);
           vi.spyOn(work, "background").mockImplementation((run) => {

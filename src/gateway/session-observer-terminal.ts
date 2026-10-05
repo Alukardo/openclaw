@@ -17,7 +17,7 @@ export function createSessionObserverTerminalPublisher(params: {
   readSession: NonNullable<SessionObserverDeps["readSession"]>;
   persistDigest: NonNullable<SessionObserverDeps["persistDigest"]>;
   now: () => number;
-  work: Pick<ReturnType<typeof createSessionObserverWork>, "readCurrent" | "closing" | "resetting">;
+  work: Pick<ReturnType<typeof createSessionObserverWork>, "withCurrent" | "closing" | "resetting">;
   runStillCurrent: (runId: string, sessionKey: string, agentId: string) => () => boolean;
   broadcast: (digest: SessionObserverDigest, agentId: string) => void;
   onError: (runId: string, error: unknown) => void;
@@ -46,7 +46,8 @@ export function createSessionObserverTerminalPublisher(params: {
       const digest = await synthesizeSessionObserverTerminalDigest({
         source,
         dormant,
-        readSession: reader ? () => reader.read() : params.readSession,
+        // Synthesis only prepares a write; its transaction revalidates the row before commit.
+        readSession: reader ? () => reader.withRead((session) => session) : params.readSession,
         persistDigest: (input) => params.persistDigest({ ...input, ...(reader ? { reader } : {}) }),
         now: params.now,
         stillCurrent,
@@ -54,16 +55,16 @@ export function createSessionObserverTerminalPublisher(params: {
       if (!digest) {
         return;
       }
-      const session = await params.work.readCurrent(reader, sessionKey, agentId);
-      reader?.assertCurrent();
-      if (
-        !params.work.closing &&
-        stillCurrent() &&
-        !params.work.resetting.has(resolveSessionSubscriptionKey(sessionKey, agentId)) &&
-        isSameSessionObserverLifecycle(digest, session)
-      ) {
-        params.broadcast(digest, agentId);
-      }
+      await params.work.withCurrent(reader, sessionKey, agentId, (session) => {
+        if (
+          !params.work.closing &&
+          stillCurrent() &&
+          !params.work.resetting.has(resolveSessionSubscriptionKey(sessionKey, agentId)) &&
+          isSameSessionObserverLifecycle(digest, session)
+        ) {
+          params.broadcast(digest, agentId);
+        }
+      });
     } catch (error) {
       params.onError(runId, error);
     }

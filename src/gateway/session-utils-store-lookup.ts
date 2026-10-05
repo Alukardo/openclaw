@@ -313,6 +313,7 @@ export async function withGatewaySessionStoreTarget<T>(
     "cfg" | "key" | "agentId" | "env" | "projection"
   > & {
     includeMembership?: boolean;
+    ordered?: boolean;
   },
   consume: (
     target: GatewaySessionStoreTargetWithStore,
@@ -442,6 +443,7 @@ export async function withGatewaySessionStoreTarget<T>(
               return consume(target, memberships, assertCurrent);
             },
             {
+              ordered: params.ordered,
               prepareSource(input, database, source) {
                 for (const { read, scope } of publications) {
                   if (

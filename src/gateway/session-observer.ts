@@ -370,67 +370,76 @@ export function createSessionObserver(deps: SessionObserverDeps): SessionObserve
           state,
           selectedNotes.map((note) => note.text),
         );
-        const session = await work.readCurrent(state.reader, state.sessionKey, state.agentId);
-        state.reader?.assertCurrent();
-        if (!acceptDigestPublication(session)) {
+        const digest = await work.withCurrent(
+          state.reader,
+          state.sessionKey,
+          state.agentId,
+          (session) => {
+            if (!acceptDigestPublication(session)) {
+              return undefined;
+            }
+            preamblePublisher.clear(state);
+            state.consecutiveFailures = 0;
+            state.revision += 1;
+            retireSelectedNotes();
+            const digest: SessionObserverDigest = {
+              sessionKey: state.sessionKey,
+              agentId: state.agentId,
+              ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+              ...(state.lifecycleRevision ? { lifecycleRevision: state.lifecycleRevision } : {}),
+              runId: state.runId,
+              revision: state.revision,
+              updatedAt: now(),
+              headline: modelDigest.headline,
+              ...(modelDigest.assessment ? { assessment: modelDigest.assessment } : {}),
+              health: final ? (state.terminalHealth ?? modelDigest.health) : modelDigest.health,
+              ...((state.planProgress ?? modelDigest.planProgress)
+                ? { planProgress: state.planProgress ?? modelDigest.planProgress }
+                : {}),
+            };
+            const previous = state.previousDigest?.health;
+            const next = digest.health;
+            const criticalTransition =
+              (next === "stuck" || next === "waiting-on-user") && previous !== next;
+            state.previousDigest = digest;
+            // The existing gateway.controlUi.sessionObserver=false gate prevents this
+            // run entirely, so the wider critical announce inherits the same opt-out.
+            const recipients = criticalTransition
+              ? audience.criticalRecipients(state.sessionKey, state.agentId)
+              : audience.recipients(state.sessionKey, state.agentId);
+            broadcastDigest(digest, recipients, state.agentId);
+            return digest;
+          },
+        );
+        if (!digest) {
           return;
         }
-        preamblePublisher.clear(state);
-        state.consecutiveFailures = 0;
-        state.revision += 1;
-        retireSelectedNotes();
-        const digest: SessionObserverDigest = {
-          sessionKey: state.sessionKey,
-          agentId: state.agentId,
-          ...(state.sessionId ? { sessionId: state.sessionId } : {}),
-          ...(state.lifecycleRevision ? { lifecycleRevision: state.lifecycleRevision } : {}),
-          runId: state.runId,
-          revision: state.revision,
-          updatedAt: now(),
-          headline: modelDigest.headline,
-          ...(modelDigest.assessment ? { assessment: modelDigest.assessment } : {}),
-          health: final ? (state.terminalHealth ?? modelDigest.health) : modelDigest.health,
-          ...((state.planProgress ?? modelDigest.planProgress)
-            ? { planProgress: state.planProgress ?? modelDigest.planProgress }
-            : {}),
-        };
-        const previous = state.previousDigest?.health;
-        const next = digest.health;
-        const criticalTransition =
-          (next === "stuck" || next === "waiting-on-user") && previous !== next;
-        state.previousDigest = digest;
-        // The existing gateway.controlUi.sessionObserver=false gate prevents this
-        // run entirely, so the wider critical announce inherits the same opt-out.
-        const recipients = criticalTransition
-          ? audience.criticalRecipients(state.sessionKey, state.agentId)
-          : audience.recipients(state.sessionKey, state.agentId);
-        broadcastDigest(digest, recipients, state.agentId);
         await persistAcceptedDigest(state, digest, final);
         if (final) {
           dormantRuns.delete(state.runId);
         }
       } catch (error) {
-        const session = await work.readCurrent(state.reader, state.sessionKey, state.agentId);
-        state.reader?.assertCurrent();
-        if (!acceptDigestPublication(session)) {
-          return;
-        }
-        state.consecutiveFailures += 1;
-        if (state.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          observerLog.warn("session observer disabled after consecutive failures", {
-            sessionKey: state.sessionKey,
-            runId: state.runId,
-            consecutiveFailures: state.consecutiveFailures,
-            error: formatErrorMessage(error),
-          });
-          if (final || state.finalPending || state.terminalHealth) {
-            retireTerminalState(state);
-          } else {
-            disableModelForRun(state);
+        await work.withCurrent(state.reader, state.sessionKey, state.agentId, (session) => {
+          if (!acceptDigestPublication(session)) {
+            return;
           }
-        } else if (final) {
-          state.finalPending = true;
-        }
+          state.consecutiveFailures += 1;
+          if (state.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            observerLog.warn("session observer disabled after consecutive failures", {
+              sessionKey: state.sessionKey,
+              runId: state.runId,
+              consecutiveFailures: state.consecutiveFailures,
+              error: formatErrorMessage(error),
+            });
+            if (final || state.finalPending || state.terminalHealth) {
+              retireTerminalState(state);
+            } else {
+              disableModelForRun(state);
+            }
+          } else if (final) {
+            state.finalPending = true;
+          }
+        });
       } finally {
         if (lifecycle.isTracked(state)) {
           state.inFlight = false;

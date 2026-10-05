@@ -44,7 +44,7 @@ export const SESSION_OBSERVER_MODEL_MAX_TOKENS = 300;
 
 export type SessionObserverRead = {
   assertCurrent: () => void;
-  read: () => Promise<SessionEntry | undefined>;
+  withRead: <T>(consume: (session: SessionEntry | undefined) => T) => Promise<T>;
   persist: NonNullable<SessionObserverDeps["persistDigest"]>;
 };
 

@@ -3,8 +3,12 @@ import { expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
 import { writeSessionEntry } from "../config/sessions/session-accessor.sqlite-entry-store.js";
 import { replaceSessionEntry } from "../config/sessions/session-accessor.sqlite-entry.js";
+import * as historyReaders from "../config/sessions/session-transcript-worker-readers.js";
 import { createDeferredCore } from "../shared/deferred.js";
-import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
+import {
+  closeOpenClawAgentDatabaseByPathAsync,
+  openOpenClawAgentDatabase,
+} from "../state/openclaw-agent-db.js";
 import { observeMainThreadSql } from "../test-utils/main-thread-sql-spies.test-support.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { createSessionMessageSubscriberRegistry } from "./server-chat-state.js";
@@ -12,9 +16,28 @@ import type { SessionObserverDeps } from "./session-observer-model.js";
 import { createSessionObserver } from "./session-observer.js";
 import { event, modelMessage, preparedModel } from "./session-observer.test-utils.js";
 import { notifyGatewaySessionReset } from "./session-reset-notifications.js";
-import * as sessionReads from "./session-utils-store-worker.js";
+import * as sessionReads from "./session-utils-store-lookup.js";
 
 const key = "agent:main:session-1";
+
+function interceptNextEntryRead(afterRead: () => void | Promise<void>) {
+  const createReaders = historyReaders.createSessionHistoryWorkerReaders;
+  let intercepted = false;
+  vi.spyOn(historyReaders, "createSessionHistoryWorkerReaders").mockImplementation((runRequest) => {
+    const readers = createReaders(runRequest);
+    return {
+      ...readers,
+      readExactEntries: async (...args) => {
+        const result = await readers.readExactEntries(...args);
+        if (!intercepted) {
+          intercepted = true;
+          await afterRead();
+        }
+        return result;
+      },
+    };
+  });
+}
 
 async function withObserver(
   run: (fixture: {
@@ -23,7 +46,9 @@ async function withObserver(
     persisted: ReturnType<typeof vi.fn>;
     peer: DatabaseSync;
     replaceStore: () => Promise<void>;
+    rewriteLifecycle: () => void;
     resetLifecycle: () => Promise<void>;
+    closeDatabase: () => Promise<void>;
     advanceClock: () => void;
     watch: (enabled: boolean) => void;
     enableModel: () => void;
@@ -73,14 +98,22 @@ async function withObserver(
         persisted,
         peer,
         finalized: finalized.promise,
-        advanceClock: () => {
-          now += 2_000;
+        rewriteLifecycle: () => {
+          writeSessionEntry(database, key, {
+            sessionId: "session-id",
+            lifecycleRevision: "life-b",
+            updatedAt: 2,
+          });
         },
         resetLifecycle: async () => {
           await replaceSessionEntry(
             { agentId: "main", sessionKey: key, storePath: database.path, env },
             { sessionId: "session-id", lifecycleRevision: "life-b", updatedAt: 2 },
           );
+        },
+        closeDatabase: () => closeOpenClawAgentDatabaseByPathAsync(database.path),
+        advanceClock: () => {
+          now += 2_000;
         },
         enableModel: () => {
           utilityModelRef = "openai/gpt-test";
@@ -114,7 +147,7 @@ async function withObserver(
 }
 
 it("moves observer admission, publication, terminal and companion reads off the caller and observes foreign resets", async () => {
-  await withObserver(async ({ observer, broadcast, peer }) => {
+  await withObserver(async ({ observer, broadcast, resetLifecycle }) => {
     const start = event({ stream: "lifecycle", data: { phase: "start" } });
     const sql = observeMainThreadSql();
     try {
@@ -133,11 +166,7 @@ it("moves observer admission, publication, terminal and companion reads off the 
       expect(snapshot.digest?.headline).toBe("Worker observation");
       sql.expectIdle();
       sql.restore();
-      peer
-        .prepare(
-          "UPDATE session_nodes SET entry_json = json_set(entry_json, '$.lifecycleRevision', 'life-b') WHERE session_key = ?",
-        )
-        .run(key);
+      await resetLifecycle();
       const after = observeMainThreadSql();
       try {
         expect((await observer.getCompanionSnapshotAsync(key, "main")).digest).toBeUndefined();
@@ -156,16 +185,42 @@ it("moves observer admission, publication, terminal and companion reads off the 
   });
 });
 
+it.for(["rewrite", "close"] as const)(
+  "refuses a companion snapshot when its read owner changes before consumption (%s)",
+  async (change) => {
+    await withObserver(async ({ observer, rewriteLifecycle, closeDatabase }) => {
+      await observer.handleEventAsync(
+        event({ stream: "item", data: { kind: "preamble", progressText: "Previous lifecycle" } }),
+      );
+      let closing: Promise<void> | undefined;
+      interceptNextEntryRead(() => {
+        if (change === "rewrite") {
+          rewriteLifecycle();
+        } else {
+          closing = closeDatabase();
+        }
+      });
+      try {
+        await expect(observer.getCompanionSnapshotAsync(key, "main")).rejects.toThrow(
+          /changed|revoked|closed|current|admission/i,
+        );
+      } finally {
+        await closing;
+      }
+    });
+  },
+);
+
 it("keeps queued preambles and terminal events behind awaited start admission", async () => {
   await withObserver(async ({ observer, broadcast, persisted }) => {
     const entered = createDeferredCore();
     const release = createDeferredCore();
-    const read = sessionReads.loadGatewaySessionEntryReadOnlyInWorker;
-    vi.spyOn(sessionReads, "loadGatewaySessionEntryReadOnlyInWorker").mockImplementationOnce(
-      async (params) => {
+    const read = sessionReads.withGatewaySessionStoreTarget;
+    vi.spyOn(sessionReads, "withGatewaySessionStoreTarget").mockImplementationOnce(
+      async (params, consume) => {
         entered.resolve();
         await release.promise;
-        return read(params);
+        return read(params, consume);
       },
     );
     const start = observer.handleEventAsync(
@@ -196,29 +251,20 @@ it("keeps queued preambles and terminal events behind awaited start admission", 
 });
 
 it("fences an already returned row immediately when reset notification arrives", async () => {
-  await withObserver(async ({ observer, broadcast, peer }) => {
+  await withObserver(async ({ observer, broadcast, rewriteLifecycle }) => {
     const entered = createDeferredCore();
     const release = createDeferredCore();
-    const read = sessionReads.loadGatewaySessionEntryReadOnlyInWorker;
-    vi.spyOn(sessionReads, "loadGatewaySessionEntryReadOnlyInWorker").mockImplementationOnce(
-      async (params) => {
-        const row = await read(params);
-        entered.resolve();
-        await release.promise;
-        return row;
-      },
-    );
+    interceptNextEntryRead(async () => {
+      entered.resolve();
+      await release.promise;
+    });
     const old = observer.handleEventAsync(
       event({ stream: "item", data: { kind: "preamble", progressText: "Retired work" } }),
     );
-    const refused = expect(old).rejects.toThrow("lifecycle changed");
+    const refused = expect(old).rejects.toThrow("Session entry changed during read");
     try {
       await entered.promise;
-      peer
-        .prepare(
-          "UPDATE session_nodes SET entry_json = json_set(entry_json, '$.lifecycleRevision', 'life-b') WHERE session_key = ?",
-        )
-        .run(key);
+      rewriteLifecycle();
       notifyGatewaySessionReset(key, "main");
       release.resolve();
       await refused;
@@ -343,7 +389,7 @@ it("joins the worker-backed persistence of a synchronously admitted digest", asy
 it("fences a context-reduced dormant read before it can retire a reset successor", async ({
   signal,
 }) => {
-  await withObserver(async ({ observer, watch, enableModel, resetLifecycle }) => {
+  await withObserver(async ({ observer, watch, enableModel, rewriteLifecycle }) => {
     await observer.handleEventAsync(
       event({ stream: "item", data: { kind: "preamble", progressText: "Retained work" } }),
     );
@@ -352,22 +398,17 @@ it("fences a context-reduced dormant read before it can retire a reset successor
     watch(true);
     const entered = createDeferredCore();
     const release = createDeferredCore();
-    const read = sessionReads.loadGatewaySessionEntryReadOnlyInWorker;
-    vi.spyOn(sessionReads, "loadGatewaySessionEntryReadOnlyInWorker").mockImplementationOnce(
-      async (params) => {
-        const row = await read(params);
-        entered.resolve();
-        await release.promise;
-        return row;
-      },
-    );
+    interceptNextEntryRead(async () => {
+      entered.resolve();
+      await release.promise;
+    });
     const terminal = event({
       stream: "lifecycle",
       data: { phase: "end", startedAt: 0, endedAt: 31_000 },
     });
     delete terminal.agentId;
     const pending = observer.handleEventAsync(terminal);
-    const refused = expect(pending).rejects.toThrow("lifecycle changed");
+    const refused = expect(pending).rejects.toThrow("Session entry changed during read");
     try {
       await withinTest(
         awaitGateBeforeSettlement(
@@ -377,7 +418,7 @@ it("fences a context-reduced dormant read before it can retire a reset successor
         ),
         signal,
       );
-      await resetLifecycle();
+      rewriteLifecycle();
       observer.handleEvent(
         event({
           runId: "successor",

@@ -31,6 +31,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/auto-reply/reply/conversation-turn-capture.test.ts",
   "src/auto-reply/reply/agent-runner-result-accounting.persistence.test.ts",
   "src/auto-reply/reply/dispatch-from-config.pending-final.test.ts",
+  "src/auto-reply/reply/followup-turn-execution.worker.test.ts",
   "src/auto-reply/reply/queue.pending-inputs.test.ts",
   "src/auto-reply/reply/session-reset-prompt.test.ts",
   "src/status/status-plugin-health.runtime.test.ts",

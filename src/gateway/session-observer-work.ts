@@ -133,10 +133,11 @@ export function createSessionObserverWork(params: {
             if (!source) {
               throw new Error("Session observer event has no captured source");
             }
-            const session = await source.read();
-            assertCurrent();
-            source.assertCurrent();
-            next = steps.next(session);
+            next = await source.withRead((session) => {
+              assertCurrent();
+              source.assertCurrent();
+              return steps.next(session);
+            });
           }
         }
       },
@@ -184,14 +185,18 @@ export function createSessionObserverWork(params: {
       void disposeAsync().catch(reportError);
       params.finishClose();
     },
-    async readCurrent(
+    async withCurrent<T>(
       reader: SessionObserverRead | undefined,
       sessionKey: string,
       agentId: string,
+      consume: (session: SessionEntry | undefined) => T,
     ) {
-      const session = reader ? await reader.read() : params.readSession(sessionKey, agentId);
-      reader?.assertCurrent();
-      return session;
+      return reader
+        ? reader.withRead((session) => {
+            reader.assertCurrent();
+            return consume(session);
+          })
+        : consume(params.readSession(sessionKey, agentId));
     },
     refreshAfterReset(
       sessionKey: string,
@@ -212,10 +217,11 @@ export function createSessionObserverWork(params: {
       resetting.set(scopeKey, reset);
       void enqueue(scopeKey, async (assertCurrent) => {
         try {
-          const session = await reader.read();
-          assertCurrent();
-          reader.assertCurrent();
-          consume(session);
+          await reader.withRead((session) => {
+            assertCurrent();
+            reader.assertCurrent();
+            consume(session);
+          });
         } finally {
           if (resetting.get(scopeKey) === reset) {
             resetting.delete(scopeKey);
@@ -238,13 +244,7 @@ export function createSessionObserverWork(params: {
         consume(params.readSession(state.sessionKey, state.agentId));
         return undefined;
       }
-      return acceptedWork
-        .track(async () => {
-          const session = await state.reader!.read();
-          state.reader!.assertCurrent();
-          consume(session);
-        })
-        .catch(reportError);
+      return acceptedWork.track(() => state.reader!.withRead(consume)).catch(reportError);
     },
     async getCompanionSnapshotAsync(this: void, sessionKey: string, selectedAgentId?: string) {
       if (closing) {
@@ -259,10 +259,11 @@ export function createSessionObserverWork(params: {
       return enqueue(
         resolveSessionSubscriptionKey(target.canonicalSessionKey, target.agentId),
         async (assertCurrent) => {
-          const session = await reader.read();
-          assertCurrent();
-          reader.assertCurrent();
-          return params.companionReader.read(target, session);
+          return reader.withRead((session) => {
+            assertCurrent();
+            reader.assertCurrent();
+            return params.companionReader.read(target, session);
+          });
         },
       );
     },

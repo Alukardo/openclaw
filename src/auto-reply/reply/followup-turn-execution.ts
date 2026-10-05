@@ -1,9 +1,12 @@
 import { settleProgressVisibilityCallbackResult } from "../../channels/progress-visibility.js";
 import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
+import { resolveSqliteSessionKey } from "../../config/sessions/session-accessor.sqlite-scope-helpers.js";
 import { sessionPersonalProfileId } from "../../config/sessions/session-entry-provenance.js";
+import { withOrderedSessionEntriesInWorker } from "../../config/sessions/session-entry-read-ordered.js";
 import {
   captureSessionEntryReadScope,
-  readSessionEntryReadOnlyInWorker,
+  isNativeSessionEntryRead,
+  withSessionStoreReaderInWorker,
 } from "../../config/sessions/session-entry-read-runtime.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import { logVerbose } from "../../globals.js";
@@ -99,13 +102,14 @@ export async function executeFollowupTurn(params: {
   const isHeartbeat = false;
   const roomEvent = turn.queued.currentInboundEventKind === "room_event";
   const progressAllowed = () => turn.sendPolicy === "allow" && !roomEvent;
-  const verboseReadScope =
+  const verboseRead =
     turn.session.kind === "session" && turn.session.storePath
       ? captureSessionEntryReadScope({
           storePath: turn.session.storePath,
           sessionKey: turn.session.key,
-        }).scope
+        })
       : undefined;
+  const verboseReadScope = verboseRead?.scope;
   const currentVerboseLevel = (prepared?: { entry: SessionEntry | undefined }): VerboseLevel => {
     if (turn.queued.run.verboseLevelOverride !== undefined) {
       return turn.queued.run.verboseLevelOverride;
@@ -169,16 +173,51 @@ export async function executeFollowupTurn(params: {
           }
         };
         assertCurrent();
-        let entry: SessionEntry | undefined;
-        if (verboseReadScope && turn.queued.run.verboseLevelOverride === undefined) {
+        if (verboseReadScope?.storePath && turn.queued.run.verboseLevelOverride === undefined) {
+          if (isNativeSessionEntryRead(verboseReadScope, verboseRead?.agentId)) {
+            const visible = progressAllowed() && shouldEmitVerboseToolResult();
+            assertCurrent();
+            return visible;
+          }
           try {
-            entry = await readSessionEntryReadOnlyInWorker(verboseReadScope, assertCurrent);
+            const visible = await withSessionStoreReaderInWorker(
+              { ...verboseReadScope, storePath: verboseReadScope.storePath },
+              (source) => {
+                const sessionKey = resolveSqliteSessionKey(
+                  verboseReadScope.sessionKey,
+                  source.logicalAgentId,
+                );
+                return withOrderedSessionEntriesInWorker(
+                  [
+                    {
+                      agentId: source.database.agentId,
+                      storePath: source.database.path,
+                      sessionKeys: [sessionKey],
+                      projection: "exact",
+                      env: source.database.env,
+                    },
+                  ],
+                  ([read]) => {
+                    read!.assertCurrent();
+                    assertCurrent();
+                    const entry = read!.result.entries.find(
+                      (item) => item.sessionKey === sessionKey,
+                    )?.entry;
+                    return progressAllowed() && currentVerboseLevel({ entry }) !== "off";
+                  },
+                  (_input, consume) => consume(source),
+                );
+              },
+              { backing: true, logical: { assertCurrent } },
+            );
+            assertCurrent();
+            return visible;
           } catch {
             // Match the existing maintenance fallback, but never swallow lost authority.
           }
         }
         assertCurrent();
-        return progressAllowed() && currentVerboseLevel({ entry }) !== "off";
+        return progressAllowed() && currentVerboseLevel({ entry: undefined }) !== "off";
       },
     });
   turn.operation.abortSignal.throwIfAborted();

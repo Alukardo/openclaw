@@ -961,6 +961,9 @@ authority boundaries. Events retain FIFO order; reset notifications immediately
 fence pending reads, and publication rechecks the current lifecycle and audience
 after preparation. Digest persistence uses the existing agent worker patch guard
 to recheck retained host authority during transaction validation and before commit.
+Observer acceptance retains the original database generation and writer FIFO through
+its synchronous consumer. A native mutation witness rejects intervening synchronous
+SDK rewrites, and database closure revokes pending reads before disclosure.
 Gateway close rejects new observation work and joins accepted
 reads and digest persistence before closing database workers. Accepted persistence
 does not inherit scheduler cancellation, and failed write replies never authorize

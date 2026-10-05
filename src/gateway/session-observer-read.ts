@@ -8,7 +8,9 @@ import { readDatabasePathIdentitySync } from "../infra/sqlite-worker-identity.js
 import type { SessionObserverDeps, SessionObserverRead } from "./session-observer-model.js";
 import { defaultPersistDigest } from "./session-observer-model.js";
 import { captureSessionMutationRouting } from "./session-sharing-preparation.js";
-import { loadGatewaySessionEntryReadOnlyInWorker } from "./session-utils-store-worker.js";
+import { withGatewaySessionStoreTarget } from "./session-utils-store-lookup.js";
+import { findCanonicalStoreMatch } from "./session-utils-store-selection.js";
+import type { GatewaySessionStoreTargetWithStore } from "./session-utils-store.types.js";
 
 /** One observation retains its physical sources; every read still fetches current rows. */
 export function captureSessionObserverRead(
@@ -20,7 +22,7 @@ export function captureSessionObserverRead(
   const routing = captureSessionMutationRouting(cfg);
   const inventory = prepareSessionStoreTargetInventory(cfg, [agentId]);
   const identities = captureSessionStoreCandidateIdentities(inventory.candidates);
-  let target: Awaited<ReturnType<typeof loadGatewaySessionEntryReadOnlyInWorker>> | undefined;
+  let target: GatewaySessionStoreTargetWithStore | undefined;
   const assertCurrent = () => {
     routing(deps.getConfig());
     for (const candidate of inventory.candidates) {
@@ -34,32 +36,38 @@ export function captureSessionObserverRead(
   };
   const reader: SessionObserverRead = {
     assertCurrent,
-    async read() {
+    async withRead(consume) {
       assertCurrent();
       if (deps.readSession) {
         const entry = deps.readSession(sessionKey, agentId);
         assertCurrent();
-        return entry;
+        return consume(entry);
       }
-      const loaded = await loadGatewaySessionEntryReadOnlyInWorker({
-        cfg: inventory.config,
-        env: inventory.env,
-        key: sessionKey,
-        agentId,
-        assertActive: assertCurrent,
-      });
-      assertCurrent();
-      if (
-        target &&
-        (!isDeepStrictEqual(target.capturedReadSources, loaded.capturedReadSources) ||
-          !isDeepStrictEqual(target.capturedReadSource, loaded.capturedReadSource) ||
-          target.canonicalKey !== loaded.canonicalKey)
-      ) {
-        throw new Error("Session observer source changed during observation");
-      }
-      // Retain source locators, never a row snapshot for subsequent authority checks.
-      target = { ...loaded, entry: undefined, store: {} };
-      return loaded.entry;
+      return withGatewaySessionStoreTarget(
+        {
+          cfg: inventory.config,
+          env: inventory.env,
+          key: sessionKey,
+          agentId,
+          projection: "full",
+          ordered: true,
+        },
+        (loaded, _members, assertReadCurrent) => {
+          assertCurrent();
+          assertReadCurrent();
+          if (
+            target &&
+            (!isDeepStrictEqual(target.capturedReadSources, loaded.capturedReadSources) ||
+              !isDeepStrictEqual(target.capturedReadSource, loaded.capturedReadSource) ||
+              target.canonicalKey !== loaded.canonicalKey)
+          ) {
+            throw new Error("Session observer source changed during observation");
+          }
+          // Keep only locators between reads; acceptance retains the live reader and writer FIFO.
+          target = { ...loaded, store: {} };
+          return consume(findCanonicalStoreMatch(loaded.store, loaded.storeKeys)?.entry);
+        },
+      );
     },
     async persist(params) {
       assertCurrent();
@@ -68,7 +76,7 @@ export function captureSessionObserverRead(
       }
       if (!target) {
         // Legacy event admission is synchronous; its asynchronous write still prepares the source.
-        await reader.read();
+        await reader.withRead(() => undefined);
         assertCurrent();
       }
       if (!target) {
