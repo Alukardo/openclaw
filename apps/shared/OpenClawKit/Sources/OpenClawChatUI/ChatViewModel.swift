@@ -644,7 +644,7 @@ public final class OpenClawChatViewModel {
 
     @discardableResult
     public func resumeFromForeground() -> Task<Void, Never> {
-        return Task { await self.refreshRunStateAfterForeground() }
+        Task { await self.refreshRunStateAfterForeground() }
     }
 
     public func abort() {
