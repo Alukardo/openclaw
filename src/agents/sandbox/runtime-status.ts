@@ -26,6 +26,7 @@ import {
   captureSessionEntryReadScope,
   isNativeSessionEntryRead,
   withSessionEntryReadOnlyInWorker,
+  withSessionEntriesFromStoreInWorker,
   withSessionEntriesFromStoresInWorker,
 } from "../../config/sessions/session-entry-read-runtime.js";
 import type {
@@ -124,28 +125,63 @@ export async function withSandboxRuntimeStatusInWorker<T>(
     }
   };
   assertCurrent();
-  return withSessionEntryReadOnlyInWorker(
-    {
-      agentId: classification.classificationAgentId,
-      sessionKey: classification.comparableSessionKey,
-      storePath:
-        source.readSource?.path ??
-        resolveSessionStorePathWithContext(
-          params.cfg?.session?.store,
-          {
-            agentId: classification.classificationAgentId,
-            env: source.env,
-          },
-          { cwd: source.cwd },
-        ),
-      env: source.env,
-    },
-    assertCurrent,
-    async (read) => {
+  const scope = {
+    agentId: classification.classificationAgentId,
+    sessionKey: resolveSqliteSessionKey(
+      classification.comparableSessionKey,
+      classification.classificationAgentId,
+    ),
+    storePath:
+      source.readSource?.path ??
+      resolveSessionStorePathWithContext(
+        params.cfg?.session?.store,
+        {
+          agentId: classification.classificationAgentId,
+          env: source.env,
+        },
+        { cwd: source.cwd },
+      ),
+    env: source.env,
+  };
+  if (isNativeSessionEntryRead(scope, scope.agentId)) {
+    return withSessionEntryReadOnlyInWorker(scope, assertCurrent, async (read) => {
       if (!read.ok) {
         throw read.error;
       }
       return prepare(read.value);
+    });
+  }
+  const candidates = captureSessionStoreReadCandidates(scope.storePath);
+  const identities = captureSessionStoreCandidateIdentities(candidates);
+  // Exact reads validate selected foreign row bytes without requiring a listing's writer proof.
+  return withSessionEntriesFromStoreInWorker(
+    {
+      ...scope,
+      sessionKeys: [
+        normalizeStoreSessionKey(scope.sessionKey),
+        ...collectSessionEntryLookupKeys(scope.sessionKey),
+      ],
+      projection: "exact",
+    },
+    async (read) => {
+      assertCurrent();
+      const result = await prepare(
+        resolveSessionEntryCandidates({
+          entries: read.result.entries,
+          sessionKey: scope.sessionKey,
+          canonicalKeys: true,
+        }).existing?.entry,
+      );
+      assertCurrent();
+      read.assertCurrent();
+      return result;
+    },
+    false,
+    (database, identity) => {
+      const expected = identities.get(assertSessionStoreReadCandidate(database.path, candidates));
+      if (!expected || expected.key !== identity.key || expected.birthtime !== identity.birthtime) {
+        throw new Error("Sandbox classification source changed during preparation");
+      }
     },
   );
 }

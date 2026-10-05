@@ -9,6 +9,7 @@ import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.j
 import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
 import { observeMainThreadSql } from "../../test-utils/main-thread-sql-spies.test-support.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { cleanupSessionStateForTest } from "../../test-utils/session-state-cleanup.js";
 import { createQueueTestRun } from "./queue.test-helpers.js";
 import { createTestReplyOperation } from "./reply-run-registry.test-helpers.js";
 import { testing } from "./reply-run-registry.test-support.js";
@@ -88,6 +89,8 @@ it.each(["main", "policy"])(
         { agentId: policyAgent, sessionKey: classificationKey },
         { sessionId: "policy", updatedAt: 1, sandboxMode: "off" },
       );
+      // Settle setup maintenance before retaining the readers used across the foreign commit.
+      await cleanupSessionStateForTest({ stateDir: state.stateDir, rootPath: state.root });
       const run = createQueueTestRun({ prompt: "authority" });
       Object.assign(run.run, {
         sessionKey: executionKey,

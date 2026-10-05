@@ -221,6 +221,7 @@ export function resolveReplyBackendMessageInjectionRejection(params: {
           ...params.preparation,
           assertCurrent: createMessageInjectionAuthority(() => {
             params.preparation!.assertCurrent();
+            params.assertCurrent?.();
             return params.canInject();
           }),
         },

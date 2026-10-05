@@ -152,8 +152,8 @@ it.each(["worker", "compatibility"] as const)(
   },
 );
 
-it.each(["source-only", "with-overlay", "legacy"] as const)(
-  "keeps supplied source authority without a raw assertion: %s",
+it.each(["source-only", "with-overlay", "separate-caller", "legacy"] as const)(
+  "keeps every supplied authority through final admission: %s",
   async (kind) => {
     const operation = createTestReplyOperation();
     operation.bindToolAuthoritySnapshot({ fingerprint: () => "policy", project: () => "policy" });
@@ -195,8 +195,9 @@ it.each(["source-only", "with-overlay", "legacy"] as const)(
         isInboundUserMessage: true,
         toolAuthorityFingerprint: "policy",
         ...(kind === "with-overlay" ? { toolAuthorityOverlay: overlay } : {}),
+        assertCurrent: kind === "separate-caller" ? assertSource : undefined,
         toolAuthorityPreparation: {
-          assertCurrent: assertSource,
+          assertCurrent: kind === "separate-caller" ? () => {} : assertSource,
           async prepareCurrent() {},
           compatAssertCurrent: assertSource,
         },
