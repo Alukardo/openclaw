@@ -11,7 +11,7 @@ import {
   resetSessionObserverEventSequence,
 } from "./session-observer.test-utils.js";
 
-it.for(["model", "synthesized terminal"] as const)(
+it.for(["model", "failed model", "synthesized terminal"] as const)(
   "rechecks physical source authority in the consuming frame for a %s digest",
   async (kind, { signal }) => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
@@ -25,6 +25,7 @@ it.for(["model", "synthesized terminal"] as const)(
       let sourceChanges = 0;
       let backgroundRegistrations = 0;
       let backgroundFinished = createDeferred();
+      const backgroundSettlements: Promise<void>[] = [];
       const createWork = observerWork.createSessionObserverWork;
       const factory = vi
         .spyOn(observerWork, "createSessionObserverWork")
@@ -46,11 +47,14 @@ it.for(["model", "synthesized terminal"] as const)(
           vi.spyOn(work, "background").mockImplementation((run) => {
             backgroundRegistrations += 1;
             const finished = backgroundFinished;
+            const settled = createDeferred();
+            backgroundSettlements.push(settled.promise);
             background(async () => {
               try {
                 return await run();
               } finally {
                 finished.resolve();
+                settled.resolve();
               }
             });
           });
@@ -60,19 +64,22 @@ it.for(["model", "synthesized terminal"] as const)(
       try {
         harness = createHarness({
           config,
-          utilityModelRef: kind === "model" ? "openai/gpt-test" : null,
+          utilityModelRef: kind === "synthesized terminal" ? null : "openai/gpt-test",
           readSession: vi.fn(() => ({
             sessionId: "session-id",
             lifecycleRevision: "owned",
             updatedAt: 1,
           })),
           prepareModel: vi.fn(async () => preparedModel()),
-          completeModel: vi.fn(async () =>
-            modelMessage({ headline: "Finished reviewing", health: "done" }),
-          ),
+          completeModel: vi.fn(async () => {
+            if (kind === "failed model") {
+              throw new Error("model request failed");
+            }
+            return modelMessage({ headline: "Finished reviewing", health: "done" });
+          }),
         });
         expect(factory).toHaveBeenCalledOnce();
-        if (kind === "model") {
+        if (kind !== "synthesized terminal") {
           await withinTest(
             harness.observer.handleEventAsync(
               event({
@@ -123,11 +130,12 @@ it.for(["model", "synthesized terminal"] as const)(
         );
         expect(backgroundRegistrations).toBeGreaterThan(0);
         await withinTest(backgroundFinished.promise, signal);
+        await withinTest(Promise.all(backgroundSettlements), signal);
 
         expect(sourceChanges).toBe(1);
         expect(config.session?.store).toBe(replacementStore);
         expect(harness.broadcastToConnIds).not.toHaveBeenCalled();
-        if (kind === "model") {
+        if (kind !== "synthesized terminal") {
           expect(harness.completeModel).toHaveBeenCalledOnce();
           expect(harness.persistDigest).not.toHaveBeenCalled();
         } else {
