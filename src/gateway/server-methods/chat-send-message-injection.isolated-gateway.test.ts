@@ -285,7 +285,7 @@ describe("terminal-receipt steer fence isolated-gateway proof (#128971)", () => 
       });
       const registrySpy = vi
         .spyOn(replyRunRegistryModule, "beginReplyMessageInjectionTarget")
-        .mockImplementation(() => ({
+        .mockImplementation(async () => ({
           targetRunId: "live-run-unrelated",
           acceptance: Promise.resolve(true),
           outcome: Promise.resolve({ status: "accepted" as const }),
