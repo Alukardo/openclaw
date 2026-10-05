@@ -54,22 +54,35 @@ function readSharedGitHubPublicationWorkspace(
       branch: workspace.branch,
     };
   }
-  if (!entry.worktree?.id) {
+  if (!entry.worktree?.id || !tableExists(db, "worktrees")) {
     return undefined;
   }
-  const worktree = tableExists(db, "worktrees")
-    ? executeSqliteQueryTakeFirstSync(
-        db,
-        query
-          .selectFrom("worktrees")
-          .select(["id", "branch", "repo_root", "repo_fingerprint"])
-          .where("owner_kind", "=", "session")
-          .where("owner_id", "=", session.sessionKey)
-          .where("removed_at", "is", null)
-          .orderBy("created_at", "desc")
-          .limit(1),
-      )
-    : undefined;
+  const worktree = executeSqliteQueryTakeFirstSync(
+    db,
+    query
+      .selectFrom("worktrees")
+      .select(["id", "branch", "repo_root", "repo_fingerprint"])
+      .where("owner_kind", "=", "session")
+      .where("owner_id", "=", session.sessionKey)
+      .where("removed_at", "is", null)
+      .orderBy("created_at", "desc")
+      .limit(1),
+  );
+  if (worktree?.id !== entry.worktree.id) {
+    const recorded = executeSqliteQueryTakeFirstSync(
+      db,
+      query
+        .selectFrom("worktrees")
+        .select(["owner_kind", "owner_id", "removed_at"])
+        .where("id", "=", entry.worktree.id),
+    );
+    if (
+      recorded?.removed_at === null &&
+      (recorded.owner_kind !== "session" || recorded.owner_id !== session.sessionKey)
+    ) {
+      throw new Error("GitHub publication session worktree owner is unavailable.");
+    }
+  }
   // Worktree GC retires idle checkouts while the session keeps its record. A retired or
   // replaced checkout has no current publication; execution still re-proves ownership.
   if (
