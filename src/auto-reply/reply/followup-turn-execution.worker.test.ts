@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { writeSessionEntry } from "../../config/sessions/session-accessor.sqlite-entry-store.js";
 import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import * as historyReaders from "../../config/sessions/session-transcript-worker-readers.js";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import {
   openOpenClawAgentDatabase,
   resolveIncognitoOpenClawAgentSqlitePath,
@@ -48,11 +49,11 @@ function createStoredTurn(params: {
   incognito?: true;
 }) {
   const selectedDatabase = params.database ?? database;
-  const entry = {
+  const entry: SessionEntry = {
     sessionId: "session",
     lifecycleRevision: "owned",
     updatedAt: 1,
-    verboseLevel: "off" as const,
+    verboseLevel: "off",
     ...(params.incognito ? { incognito: true } : {}),
   };
   writeSessionEntry(selectedDatabase, params.storedKey ?? params.key, {
@@ -70,9 +71,9 @@ function createStoredTurn(params: {
       kind: "session",
       key: params.key,
       storePath: selectedDatabase.path,
-      current: handle.getCurrent,
+      current: () => handle.getCurrent(),
       publish: (next) => next && handle.replaceCurrent(next),
-      adopt: handle.adoptCurrent,
+      adopt: (next) => handle.adoptCurrent(next),
     },
   });
   turn.queued.run.agentId = selectedDatabase.agentId;

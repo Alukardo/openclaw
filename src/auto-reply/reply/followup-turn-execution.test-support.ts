@@ -37,7 +37,8 @@ vi.mock("../../config/sessions/session-entry-read-runtime.js", async (importOrig
   withSessionStoreReaderInWorker: followupTurnTestState.withStoreReaderInWorker,
 }));
 
-vi.mock("../../config/sessions/session-entry-read-ordered.js", () => ({
+vi.mock("../../config/sessions/session-entry-read-ordered.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../config/sessions/session-entry-read-ordered.js")>()),
   withOrderedSessionEntriesInWorker: followupTurnTestState.withOrderedEntriesInWorker,
 }));
 

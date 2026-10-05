@@ -370,7 +370,7 @@ export function createSessionObserver(deps: SessionObserverDeps): SessionObserve
           state,
           selectedNotes.map((note) => note.text),
         );
-        const digest = await work.withCurrent(
+        const acceptedDigest = await work.withCurrent(
           state.reader,
           state.sessionKey,
           state.agentId,
@@ -411,10 +411,10 @@ export function createSessionObserver(deps: SessionObserverDeps): SessionObserve
             return digest;
           },
         );
-        if (!digest) {
+        if (!acceptedDigest) {
           return;
         }
-        await persistAcceptedDigest(state, digest, final);
+        await persistAcceptedDigest(state, acceptedDigest, final);
         if (final) {
           dormantRuns.delete(state.runId);
         }

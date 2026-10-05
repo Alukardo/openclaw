@@ -48,7 +48,7 @@ async function withObserver(
     replaceStore: () => Promise<void>;
     rewriteLifecycle: () => void;
     resetLifecycle: () => Promise<void>;
-    closeDatabase: () => Promise<void>;
+    closeDatabase: () => ReturnType<typeof closeOpenClawAgentDatabaseByPathAsync>;
     advanceClock: () => void;
     watch: (enabled: boolean) => void;
     enableModel: () => void;
@@ -192,7 +192,7 @@ it.for(["rewrite", "close"] as const)(
       await observer.handleEventAsync(
         event({ stream: "item", data: { kind: "preamble", progressText: "Previous lifecycle" } }),
       );
-      let closing: Promise<void> | undefined;
+      let closing: ReturnType<typeof closeOpenClawAgentDatabaseByPathAsync> | undefined;
       interceptNextEntryRead(() => {
         if (change === "rewrite") {
           rewriteLifecycle();
