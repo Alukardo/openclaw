@@ -202,12 +202,6 @@ export function createSessionHistoryWorkerReaders(
       (input) => ({ kind: "session-title-fields", ...input }),
       (value) => value.fields,
     ),
-    readStats: reader(
-      "transcript-stats",
-      "transcript statistics",
-      (input) => ({ kind: "transcript-stats", ...input }),
-      (value) => value.stats,
-    ),
     readWatermark: reader(
       "transcript-watermark",
       "a transcript watermark",

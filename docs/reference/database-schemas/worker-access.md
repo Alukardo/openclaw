@@ -2240,7 +2240,7 @@ buffer. Compaction persistence, stored bytes, retention, and update behavior are
 unchanged.
 
 Manual compaction also prepares transcript statistics and current session entries
-through the existing history and entry readers. Direct and queued compaction
+through the existing database executor and entry readers. Direct and queued compaction
 prepare harness selection and successor facts through those same owners, then
 recheck caller authority after reading. Legacy successor markers retain their
 stored-key selection, and final writer comparisons remain transaction-local.

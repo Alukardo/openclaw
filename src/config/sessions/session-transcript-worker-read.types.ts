@@ -1,12 +1,10 @@
 import type { DatabaseFileIdentity } from "../../infra/sqlite-worker-identity.js";
 import type { SessionTranscriptEventMatch } from "../../sessions/transcript-visible-record.js";
 import type { UserTurnTranscriptAdmissionReceipt } from "../../sessions/user-turn-transcript.types.js";
-import type { SessionTranscriptStats } from "./session-accessor.sqlite-contract.js";
 import type {
   ResolvedTranscriptReadScope,
   ResolvedTranscriptScope,
 } from "./session-accessor.sqlite-scope-helpers.js";
-import type { SessionTranscriptWatermark } from "./session-accessor.sqlite-transcript-watermark-read.js";
 import type {
   SessionTranscriptReadScope,
   SessionTranscriptRuntimeTarget,
@@ -69,24 +67,4 @@ export type SessionTranscriptMessagePresenceWorkerInput = Omit<
   "kind"
 > & {
   kind: "transcript-message-presence";
-};
-
-export type SessionTranscriptStatsWorkerInput = Omit<
-  SessionTranscriptWatermarkWorkerInput,
-  "kind"
-> & {
-  kind: "transcript-stats";
-};
-
-export type SessionTranscriptMetadataReaders = {
-  readStats: (
-    input: Omit<SessionTranscriptStatsWorkerInput, "kind" | "database">,
-  ) => Promise<SessionTranscriptStats>;
-  readWatermark: (
-    input: Omit<SessionTranscriptWatermarkWorkerInput, "kind" | "database">,
-  ) => Promise<SessionTranscriptWatermark>;
-  readMessagePresence: (
-    input: Omit<SessionTranscriptMessagePresenceWorkerInput, "kind" | "database">,
-    signal?: AbortSignal,
-  ) => Promise<boolean>;
 };
