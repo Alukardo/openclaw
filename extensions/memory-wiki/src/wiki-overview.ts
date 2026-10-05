@@ -118,16 +118,18 @@ export function buildMemoryWikiOverview(
     if (clusterItems.length === 0) {
       return null;
     }
-    return {
-      key: kind,
-      label: OVERVIEW_KIND_LABELS[kind],
-      itemCount: clusterItems.length,
-      claimCount: clusterItems.reduce((sum, item) => sum + item.claimCount, 0),
-      questionCount: clusterItems.reduce((sum, item) => sum + item.questionCount, 0),
-      contradictionCount: clusterItems.reduce((sum, item) => sum + item.contradictionCount, 0),
-      ...(clusterItems[0]?.updatedAt ? { updatedAt: clusterItems[0].updatedAt } : {}),
-      items: clusterItems,
-    };
+    return Object.assign(
+      {
+        key: kind,
+        label: OVERVIEW_KIND_LABELS[kind],
+        itemCount: clusterItems.length,
+        claimCount: clusterItems.reduce((sum, item) => sum + item.claimCount, 0),
+        questionCount: clusterItems.reduce((sum, item) => sum + item.questionCount, 0),
+        contradictionCount: clusterItems.reduce((sum, item) => sum + item.contradictionCount, 0),
+      },
+      clusterItems[0]?.updatedAt ? { updatedAt: clusterItems[0].updatedAt } : {},
+      { items: clusterItems },
+    );
   }).filter((entry) => entry !== null);
 
   return {

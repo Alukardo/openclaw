@@ -406,10 +406,9 @@ export async function importMemoryWikiOkfBundle(params: {
     bundleName,
     bundlePath,
   });
-  const pages = concepts.map((concept) => ({
-    ...concept,
-    ...createOkfPageIdentity(bundleKey, concept.conceptId),
-  }));
+  const pages = concepts.map((concept) =>
+    Object.assign({}, concept, createOkfPageIdentity(bundleKey, concept.conceptId)),
+  );
   const pageByConceptId = new Map(pages.map((page) => [page.conceptId, page]));
 
   const pagePaths: string[] = [];

@@ -308,19 +308,21 @@ export function buildMemoryWikiImportInsights(input: MemoryWikiImportInsightItem
       const updatedAt = clusterItems
         .map((item) => item.updatedAt ?? item.createdAt)
         .find((value): value is string => typeof value === "string" && value.length > 0);
-      return {
-        key,
-        label: clusterItems[0]?.topicLabel ?? humanizeLabelSuffix(key),
-        itemCount: clusterItems.length,
-        highRiskCount: clusterItems.filter((item) => item.riskLevel === `high`).length,
-        withheldCount: clusterItems.filter((item) => item.digestStatus === `withheld`).length,
-        preferenceSignalCount: clusterItems.reduce(
-          (sum, item) => sum + item.preferenceSignals.length,
-          0,
-        ),
-        ...(updatedAt ? { updatedAt } : {}),
-        items: clusterItems,
-      };
+      return Object.assign(
+        {
+          key,
+          label: clusterItems[0]?.topicLabel ?? humanizeLabelSuffix(key),
+          itemCount: clusterItems.length,
+          highRiskCount: clusterItems.filter((item) => item.riskLevel === `high`).length,
+          withheldCount: clusterItems.filter((item) => item.digestStatus === `withheld`).length,
+          preferenceSignalCount: clusterItems.reduce(
+            (sum, item) => sum + item.preferenceSignals.length,
+            0,
+          ),
+        },
+        updatedAt ? { updatedAt } : {},
+        { items: clusterItems },
+      );
     })
     .toSorted((left, right) => {
       const leftKey = left.updatedAt ?? "";

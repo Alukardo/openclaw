@@ -105,7 +105,7 @@ function renderCountedSections(
   emptyText: string,
   sections: Array<[label: string, heading: string, lines: string[]]>,
 ): string {
-  return sections.every(([, , lines]) => lines.length === 0)
+  return sections.every((section) => section[2].length === 0)
     ? `- ${emptyText}`
     : [
         ...sections.map(([label, , lines]) => `- ${label}: ${lines.length}`),
@@ -937,41 +937,57 @@ function buildCompiledCacheSnapshot(
   const pagesInput = scan.pages;
   const pages = pagesInput
     .toSorted((left, right) => left.relativePath.localeCompare(right.relativePath))
-    .map((page) => ({
-      ...(page.id ? { id: page.id } : {}),
-      title: page.title,
-      kind: page.kind,
-      path: page.relativePath,
-      aliases: [...page.aliases],
-      sourceIds: [...page.sourceIds],
-      questions: [...page.questions],
-      contradictions: [...page.contradictions],
-      bestUsedFor: [...page.bestUsedFor],
-      notEnoughFor: [...page.notEnoughFor],
-      relationshipCount: page.relationships.length,
-      topRelationships: page.relationships.slice(0, 5),
-      ...(page.pageType ? { pageType: page.pageType } : {}),
-      ...(page.entityType ? { entityType: page.entityType } : {}),
-      ...(page.canonicalId ? { canonicalId: page.canonicalId } : {}),
-      ...(page.privacyTier ? { privacyTier: page.privacyTier } : {}),
-      ...(page.personCard ? { personCard: page.personCard } : {}),
-      claimCount: page.claims.length,
-      topClaims: sortClaims(page)
-        .slice(0, 5)
-        .map((claim) => ({
-          ...(claim.id ? { id: claim.id } : {}),
-          text: claim.text,
-          status: normalizeClaimStatus(claim.status),
-          ...(typeof claim.confidence === "number" ? { confidence: claim.confidence } : {}),
-          freshnessLevel: assessClaimFreshness({ page, claim }).level,
-        })),
-    }));
+    .map((page) => {
+      const digestPage: Omit<
+        MemoryWikiCompiledCacheSnapshot["digest"]["pages"][number],
+        "claimCount" | "topClaims"
+      > = Object.assign(page.id ? { id: page.id } : {}, {
+        title: page.title,
+        kind: page.kind,
+        path: page.relativePath,
+        aliases: [...page.aliases],
+        sourceIds: [...page.sourceIds],
+        questions: [...page.questions],
+        contradictions: [...page.contradictions],
+        bestUsedFor: [...page.bestUsedFor],
+        notEnoughFor: [...page.notEnoughFor],
+        relationshipCount: page.relationships.length,
+        topRelationships: page.relationships.slice(0, 5),
+      });
+      if (page.pageType) {
+        digestPage.pageType = page.pageType;
+      }
+      if (page.entityType) {
+        digestPage.entityType = page.entityType;
+      }
+      if (page.canonicalId) {
+        digestPage.canonicalId = page.canonicalId;
+      }
+      if (page.privacyTier) {
+        digestPage.privacyTier = page.privacyTier;
+      }
+      if (page.personCard) {
+        digestPage.personCard = page.personCard;
+      }
+      return Object.assign(digestPage, {
+        claimCount: page.claims.length,
+        topClaims: sortClaims(page)
+          .slice(0, 5)
+          .map((claim) =>
+            Object.assign(
+              claim.id ? { id: claim.id } : {},
+              { text: claim.text, status: normalizeClaimStatus(claim.status) },
+              typeof claim.confidence === "number" ? { confidence: claim.confidence } : {},
+              { freshnessLevel: assessClaimFreshness({ page, claim }).level },
+            ),
+          ),
+      });
+    });
   const claims = pagesInput
     .flatMap((page) =>
       sortClaims(page).map((claim) => {
         const freshness = assessClaimFreshness({ page, claim });
-        return {
-          ...(claim.id ? { id: claim.id } : {}),
+        return Object.assign(claim.id ? { id: claim.id } : {}, {
           pageId: page.id,
           pageTitle: page.title,
           pageKind: page.kind,
@@ -996,7 +1012,7 @@ function buildCompiledCacheSnapshot(
           ],
           freshnessLevel: freshness.level,
           lastTouchedAt: freshness.lastTouchedAt,
-        };
+        });
       }),
     )
     .toSorted(

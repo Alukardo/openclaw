@@ -45,9 +45,9 @@ const LINT_ISSUE_KINDS = {
 
 type MemoryWikiLintIssue = ReturnType<typeof createLintIssue>;
 
-function createLintIssue(code: keyof typeof LINT_ISSUE_KINDS, path: string, message: string) {
+function createLintIssue(code: keyof typeof LINT_ISSUE_KINDS, pagePath: string, message: string) {
   const [severity, category] = LINT_ISSUE_KINDS[code];
-  return { severity, category, code, path, message };
+  return { severity, category, code, path: pagePath, message };
 }
 
 type LintMemoryWikiResult = {
