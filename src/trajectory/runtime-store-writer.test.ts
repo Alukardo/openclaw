@@ -93,7 +93,7 @@ it.each(["committed", "unknown"] as const)(
         storePath: state.statePath("agents", "main", "agent.sqlite"),
       };
       await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
-      const recorder = createTrajectoryRuntimeRecorder({
+      const recorder = await createTrajectoryRuntimeRecorder({
         sessionId: target.sessionId,
         sessionKey: target.sessionKey,
         sessionTarget: target,
@@ -163,7 +163,7 @@ it("bounds 2,000 queued events while a background append awaits settlement", asy
     };
     await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
     const maxRuntimeFileBytes = 64 * 1024;
-    const recorder = createTrajectoryRuntimeRecorder({
+    const recorder = await createTrajectoryRuntimeRecorder({
       sessionId: target.sessionId,
       sessionKey: target.sessionKey,
       sessionTarget: target,
@@ -220,7 +220,7 @@ it.each(["committed", "unknown"] as const)(
         storePath: state.statePath("agents", "main", "agent.sqlite"),
       };
       await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
-      const recorder = createTrajectoryRuntimeRecorder({
+      const recorder = await createTrajectoryRuntimeRecorder({
         sessionId: target.sessionId,
         sessionKey: target.sessionKey,
         sessionTarget: target,
@@ -274,7 +274,7 @@ it.each([3_000, 6_000])(
       };
       await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
       let allowCommit = true;
-      const recorder = createTrajectoryRuntimeRecorder({
+      const recorder = await createTrajectoryRuntimeRecorder({
         sessionId: target.sessionId,
         sessionKey: target.sessionKey,
         sessionTarget: target,
@@ -319,7 +319,7 @@ it("keeps later queue evictions after a captured append settles", async () => {
       storePath: state.statePath("agents", "main", "agent.sqlite"),
     };
     await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
-    const recorder = createTrajectoryRuntimeRecorder({
+    const recorder = await createTrajectoryRuntimeRecorder({
       sessionId: target.sessionId,
       sessionKey: target.sessionKey,
       sessionTarget: target,
@@ -361,7 +361,7 @@ it.each(["committed", "refused"] as const)(
         storePath: state.statePath("agents", "main", "agent.sqlite"),
       };
       await replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: 1 });
-      const recorder = createTrajectoryRuntimeRecorder({
+      const recorder = await createTrajectoryRuntimeRecorder({
         sessionId: target.sessionId,
         sessionKey: target.sessionKey,
         sessionTarget: target,
