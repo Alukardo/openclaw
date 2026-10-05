@@ -270,9 +270,7 @@ async function startMcpLoopbackServer(
             res.end();
             return;
           }
-          const payload = Array.isArray(parsed)
-            ? JSON.stringify(errors)
-            : JSON.stringify(errors[0]);
+          const payload = JSON.stringify(Array.isArray(parsed) ? errors : errors[0]);
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(payload);
           return;
@@ -463,9 +461,7 @@ async function startMcpLoopbackServer(
           return;
         }
 
-        const payload = Array.isArray(parsed)
-          ? JSON.stringify(responses)
-          : JSON.stringify(responses[0]);
+        const payload = JSON.stringify(Array.isArray(parsed) ? responses : responses[0]);
         if (!res.headersSent) {
           res.writeHead(200, { "Content-Type": "application/json" });
         }
@@ -572,10 +568,8 @@ export async function ensureMcpLoopbackServer(port = 0): Promise<void> {
     return;
   }
   if (!activeMcpLoopbackServerPromise) {
-    // The listener owns its context until Gateway close; callers own only requests.
-    // The first turn's work and plugin generation can retire before later requests.
+    // The process-owned listener must outlive its creator's work, generation, and authority.
     const work = new AsyncWorkScope();
-    // A process-owned listener must not retain its creator's temporary tool authority.
     activeMcpLoopbackServerPromise = runOutsideOperatorToolGatewayAuthority(() =>
       runOutsidePluginRuntimeGenerationScope(() =>
         runOutsideGatewayRootWorkAdmission(() =>
