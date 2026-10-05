@@ -25,7 +25,6 @@ type SharedMemoryResultSource =
   | { corpus: "memory"; path: string; reference?: never; lookup?: never }
   | { corpus: "memory"; path?: never; reference: MemoryReference; lookup: string };
 
-/** One memory-corpus hit in a Wiki search, tagged with the caller's search mode. */
 export type SharedMemorySearchResult<M extends string> = {
   title: string;
   kind: "memory";
@@ -39,7 +38,6 @@ export type SharedMemorySearchResult<M extends string> = {
   citations?: MemoryCitation[];
 } & SharedMemoryResultSource;
 
-/** One memory page read for a Wiki lookup. */
 export type SharedMemoryPage = {
   title: string;
   kind: "memory";
@@ -50,7 +48,6 @@ export type SharedMemoryPage = {
   citations?: MemoryCitation[];
 } & SharedMemoryResultSource;
 
-/** Normalizes a Wiki lookup into a slash-separated relative path. */
 export function normalizeLookupKey(value: string): string {
   const normalized = value.trim().replace(/\\/g, "/");
   return normalized.endsWith(".md") ? normalized : normalized.replace(/\/+$/, "");
@@ -62,7 +59,6 @@ function buildLookupCandidates(lookup: string): string[] {
   return uniqueStrings([normalized, withExtension]);
 }
 
-/** Whether a call is bound to a session or agent whose transcript visibility must be enforced. */
 export function shouldEnforceSessionVisibility(params: {
   agentId?: string;
   agentSessionKey?: string;
@@ -116,7 +112,6 @@ function buildMemorySearchTitle(resultPath: string): string {
   return basename.length > 0 ? basename : resultPath;
 }
 
-/** Caller facts a shared memory search or read acts under. */
 export type SharedMemorySearchParams = {
   appConfig?: OpenClawConfig;
   agentId?: string;
@@ -133,7 +128,6 @@ export type SharedMemorySearchOptions<M extends string> = {
   protectedSessionRecall: boolean;
 };
 
-/** Searches the selected memory owner's corpus for a Wiki query. */
 export async function searchSharedMemory<M extends string>(
   params: SharedMemorySearchParams,
   options: SharedMemorySearchOptions<M>,
@@ -148,10 +142,9 @@ export async function searchSharedMemory<M extends string>(
         maxResults: options.maxResults,
         ...(options.protectedSessionRecall ? { sources: ["sessions" as const] } : {}),
       });
-      const results: SharedMemorySearchResult<M>[] = [];
-      for (const result of page.hits) {
+      return page.hits.map((result): SharedMemorySearchResult<M> => {
         const citation = result.citations?.[0];
-        results.push({
+        return {
           corpus: "memory",
           reference: result.reference,
           lookup: memoryReferenceLookup(result.reference),
@@ -165,9 +158,8 @@ export async function searchSharedMemory<M extends string>(
           searchMode: options.mode,
           ...(citation ? { citation: citation.label } : {}),
           ...(result.citations ? { citations: result.citations } : {}),
-        });
-      }
-      return results;
+        };
+      });
     });
   }
   const sharedMemoryManager = await resolveActiveMemoryManager(params);
@@ -197,23 +189,19 @@ export async function searchSharedMemory<M extends string>(
       trustedAgentScope: !params.agentSessionKey && Boolean(params.agentId?.trim()),
     });
   }
-  const results: SharedMemorySearchResult<M>[] = [];
-  for (const result of rawMemoryResults) {
-    results.push({
-      corpus: "memory",
-      path: result.path,
-      title: buildMemorySearchTitle(result.path),
-      kind: "memory",
-      score: result.score,
-      snippet: result.snippet,
-      startLine: result.startLine,
-      endLine: result.endLine,
-      memorySource: result.source,
-      searchMode: options.mode,
-      ...(result.citation ? { citation: result.citation } : {}),
-    });
-  }
-  return results;
+  return rawMemoryResults.map((result): SharedMemorySearchResult<M> => ({
+    corpus: "memory",
+    path: result.path,
+    title: buildMemorySearchTitle(result.path),
+    kind: "memory",
+    score: result.score,
+    snippet: result.snippet,
+    startLine: result.startLine,
+    endLine: result.endLine,
+    memorySource: result.source,
+    searchMode: options.mode,
+    ...(result.citation ? { citation: result.citation } : {}),
+  }));
 }
 
 export type SharedMemoryReadParams = Omit<SharedMemorySearchParams, "query"> & {
