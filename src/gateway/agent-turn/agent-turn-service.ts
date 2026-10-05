@@ -159,6 +159,7 @@ export function createAgentTurnService(
     let preparedOffloadedRefs: OffloadedRef[] = [];
     let mainRestartRecoveryOwnerLease: MainSessionRecoveryOwnerLease | undefined;
     let releaseGatewayAdmission = () => {};
+    let respondToAdmissionOutcome = () => false;
     const cronContinuation = createCronContinuationController({
       runId,
       lifecycleGeneration,
@@ -252,6 +253,10 @@ export function createAgentTurnService(
         },
       });
       releaseGatewayAdmission = admissionController.release;
+      respondToAdmissionOutcome = () => {
+        admissionController.assertAllowed();
+        return admissionController.respondToOutcome();
+      };
       const resetPhase = await runAgentResetPhase({
         assertAdmissionCurrent: assertRequestCurrent,
         request,
@@ -627,7 +632,9 @@ export function createAgentTurnService(
       if (!(error instanceof AgentRequestReservationEndedError)) {
         throw error;
       }
-      dedupeLifecycle.handlePreparationFailure(assertAdmissionCurrent)(error);
+      if (!respondToAdmissionOutcome()) {
+        dedupeLifecycle.handlePreparationFailure(assertAdmissionCurrent)(error);
+      }
     } finally {
       try {
         if (!gatewayAdmissionTransferred) {
