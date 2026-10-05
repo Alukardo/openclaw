@@ -1,4 +1,3 @@
-import "./chrome-mcp-process.test-support.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +8,6 @@ import { createOpenClawTestState } from "openclaw/plugin-sdk/test-state";
 import { describe, expect, it, vi } from "vitest";
 import { normalizeChromeMcpOptions } from "./chrome-mcp-options.js";
 import { refreshChromeMcpCleanupProcess } from "./chrome-mcp-process.js";
-import { mockChromeMcpProcesses } from "./chrome-mcp-process.test-support.js";
 import { getChromeMcpPid, getChromeMcpSessionOwner } from "./chrome-mcp-session.js";
 import {
   clickChromeMcpCoords,
@@ -40,14 +38,15 @@ import {
   FAKE_TARGET_1,
   installChromeMcpSessionTestHooks,
   snapshotWithControls,
+  waitForChromeMcpState,
   type SessionPage,
   type ToolCall,
   type ToolCallMock,
 } from "./chrome-mcp.test-support.js";
 
-function waitForChromeMcpState<T>(assertion: () => T | Promise<T>): Promise<T> {
-  return vi.waitFor(assertion, { interval: 1 });
-}
+const { mockChromeMcpProcesses } = await vi.hoisted(
+  () => import("./chrome-mcp-process.test-support.js"),
+);
 
 function createSdkTimeoutCallTool() {
   return vi.fn(
