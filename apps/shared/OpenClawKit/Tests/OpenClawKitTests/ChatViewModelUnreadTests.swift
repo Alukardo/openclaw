@@ -124,8 +124,7 @@ private final class UnreadTestTransport: @unchecked Sendable, OpenClawChatTransp
         search _: String?,
         archived _: Bool) async throws -> OpenClawChatSessionsListResponse
     {
-        await self.state.recordListCall()
-        let sessions = await self.state.sessionOverride ?? self.sessions
+        let sessions = await self.state.recordListCall() ?? self.sessions
         let listed = if self.respectsListLimit, let limit {
             Array(sessions.prefix(limit))
         } else {
@@ -204,8 +203,11 @@ extension UnreadTestTransportState {
         self.historyCalls += 1
     }
 
-    fileprivate func recordListCall() {
+    /// Records the arrival and captures its rows in one step, so a waiter that sees the call
+    /// can no longer change what that request returns.
+    fileprivate func recordListCall() -> [OpenClawChatSessionEntry]? {
         self.listCalls += 1
+        return self.sessionOverride
     }
 
     fileprivate func recordUnreadPatch(key: String, unread: Bool) {
