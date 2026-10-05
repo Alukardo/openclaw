@@ -9,7 +9,11 @@ import { localParticipantIdentityKey } from "../../../lib/chat/sender-label.ts";
 import { chatItemGroups } from "../chat-agent-run-grouping.ts";
 import { messageRecoveryKey } from "../chat-message-recovery.ts";
 import { resolveTurnRecap, type TurnRecap } from "../chat-progress.ts";
-import { resolveChatSubagentWait } from "../chat-subagent-wait.ts";
+import {
+  placedSubagentWait,
+  resolveChatSubagentWait,
+  subagentWaitRenderKey,
+} from "../chat-subagent-wait.ts";
 import {
   assistantGroupCanOwnActiveRunStatus,
   buildCachedChatItems,
@@ -27,6 +31,7 @@ import { renderActivityGroup, renderMessageGroup } from "./chat-message-group.ts
 import { assistantMediaPolicyKey, getChatMediaRenderVersion } from "./chat-message-media.ts";
 import {
   renderStreamGroup,
+  renderUnplacedSubagentWait,
   renderWorkGroupSummary,
   type StreamGroupOptions,
 } from "./chat-message-stream.ts";
@@ -104,12 +109,7 @@ export function projectChatTranscript(
     messageRecoveryKey(props.fullMessageAgentId, messageId);
   pruneTranscriptExpansions(expandedAssistantMessages, props);
   const subagentWait = resolveChatSubagentWait(props);
-  // A wait behind a loaded handoff is that run's own status. Any other wait
-  // follows a turn that already ended, so it stays a row after the transcript.
-  const placedSubagentWait =
-    subagentWait?.runId && subagentWait.startedAt !== null && !searchFiltering
-      ? { startedAt: subagentWait.startedAt, runId: subagentWait.runId }
-      : undefined;
+  const placedWait = searchFiltering ? undefined : placedSubagentWait(subagentWait);
   const chatItemsInput = {
     paneId: props.paneId,
     sessionKey: props.sessionKey,
@@ -139,7 +139,7 @@ export function projectChatTranscript(
     persistCommentary: props.persistCommentary,
     runWorking: Boolean(props.runWorking),
     runActive: Boolean(props.runActive),
-    subagentWait: placedSubagentWait,
+    subagentWait: placedWait,
     questionPrompts: props.questionPrompts,
     loading: props.loading,
     replyPeople: [...sessionPeople].toSorted(),
@@ -378,13 +378,7 @@ export function projectChatTranscript(
   };
   // Only the working indicator shows live usage and the subagent wait, so rows
   // without one keep memoizing across usage and child-roster patches.
-  const workingUsageKey = JSON.stringify([
-    runOutputTokens,
-    subagentWait?.startedAt,
-    subagentWait?.runningCount,
-    subagentWait?.child?.key,
-    subagentWait?.child?.label,
-  ]);
+  const workingUsageKey = JSON.stringify([runOutputTokens, subagentWaitRenderKey(subagentWait)]);
   const liveStatusSignature = (item: ChatRenderItem): string => {
     if (item.kind === "agent-run-frame") {
       const hasWorkingIndicator = item.parts.some(
@@ -557,21 +551,11 @@ export function projectChatTranscript(
       content: renderTurnRecapRow(turnRecap),
     });
   }
-  if (subagentWait && !placedSubagentWait && !searchFiltering) {
+  if (subagentWait && !placedWait && !searchFiltering) {
     transcriptRows.push({
       kind: "content",
       key: "waiting-subagents",
-      content: renderStreamGroup(
-        [
-          {
-            kind: "reading-indicator",
-            key: `waiting-subagents:${props.sessionKey}`,
-            startedAt: subagentWait.startedAt ?? 0,
-            waitingOn: "subagents",
-          },
-        ],
-        streamGroupOptions,
-      ),
+      content: renderUnplacedSubagentWait(props.sessionKey, subagentWait, streamGroupOptions),
     });
   }
   const typingIndicator = renderChatTypingIndicator(
