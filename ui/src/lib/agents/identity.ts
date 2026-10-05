@@ -148,7 +148,7 @@ export function createAgentIdentityCapability(gateway: AgentIdentityGateway) {
     entries() {
       return [...identities.values()];
     },
-    async ensure(agentIds: readonly (string | null | undefined)[]) {
+    async ensure(this: void, agentIds: readonly (string | null | undefined)[]) {
       const snapshot = gateway.snapshot;
       resetForGateway(snapshot);
       const client = snapshot.client;

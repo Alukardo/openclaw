@@ -229,7 +229,7 @@ export function createMentionsCapability(
       }
       return connection ? refreshOwner(connection) : Promise.resolve();
     },
-    async dismiss(ids: readonly string[]) {
+    async dismiss(this: void, ids: readonly string[]) {
       const owner = connection;
       if (
         !owner ||
