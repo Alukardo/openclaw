@@ -268,6 +268,63 @@ describe("agent activity events", () => {
     }
   });
 
+  test.each([
+    { nesting: "direct", kept: "outer" },
+    { nesting: "through a nested wrapper", kept: "inner" },
+  ])("keeps the wrapper when its only recorded call is routine ($nesting)", ({ kept }) => {
+    const nested = (toolCallId: string, toolName: string, parentToolCallId: string) => ({
+      messageId: toolCallId,
+      message: createNestedToolActivity({
+        runId: "run",
+        scopeId: "scope",
+        afterEntryId: "outer-call",
+        startOrder: 1,
+        parentToolCallId,
+        toolCallId,
+        toolName,
+        input: {},
+        result: { content: [{ type: "text", text: "Finished" }] },
+        isError: false,
+        startedAt: 1,
+        timestamp: 2,
+      }),
+    });
+    const projected = projectAgentHistoryActivity([
+      {
+        messageId: "outer",
+        message: {
+          role: "assistant",
+          __openclaw: { runId: "run" },
+          content: [{ type: "toolCall", id: "outer", name: "exec", arguments: {} }],
+        },
+      },
+      ...(kept === "inner" ? [nested("inner", "exec", "outer")] : []),
+      nested("plan", "progress_card", kept),
+      {
+        messageId: "outer-result",
+        message: {
+          role: "toolResult",
+          __openclaw: { runId: "run" },
+          toolCallId: "outer",
+          toolName: "exec",
+          isError: false,
+          content: [{ type: "text", text: "Finished" }],
+        },
+      },
+    ]);
+    // Exactly one operation stands for the step: the innermost wrapper with no shown call.
+    expect(
+      projected.flatMap((entry) => entry.items.map((item) => [entry.messageId, item.toolCallId])),
+    ).toEqual(
+      kept === "outer"
+        ? [
+            ["outer", "outer"],
+            ["outer-result", "outer"],
+          ]
+        : [["inner", "inner"]],
+    );
+  });
+
   test.each([true, false])(
     "does not expose a child assignment in progress (named: %s)",
     (named) => {

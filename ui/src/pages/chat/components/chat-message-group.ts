@@ -220,19 +220,68 @@ export function renderActivityGroup(
         : undefined,
     });
   }
-  if (activityExpanded) {
-    for (const group of cardGroups) {
-      if (group.children.length > 0) {
-        toolCardOverrides.set(group.card, renderOperation(group));
-      }
-    }
-  }
   const approvalReviews = cards.flatMap((card) => readToolApprovalReviews(card.details));
   const recordedReviewOutcomes = cards.flatMap((card) => {
     const outcome = readToolApprovalReviewOutcome(card.details);
     return outcome ? [outcome] : [];
   });
   const reviewOutcome = resolveToolApprovalReviewOutcome(approvalReviews, recordedReviewOutcomes);
+  // A settled step that completed with only routine nested calls is one operation:
+  // its own row names it and keeps those calls underneath, where a count hides both.
+  // Other outcomes and reviewed steps keep the counted row that carries their status.
+  const [step] = cardGroups;
+  const stepActivity = step ? preparedByCard.get(step.card) : undefined;
+  const soleStep =
+    !headline &&
+    !reviewOutcome &&
+    approvalReviews.length === 0 &&
+    step !== undefined &&
+    cardGroups.length === 1 &&
+    step.children.length > 0 &&
+    visibleCalls.size === 1 &&
+    stepActivity?.status === "completed" &&
+    visibleCalls.has(stepActivity.toolCallId ?? stepActivity.itemId);
+  if (activityExpanded || soleStep) {
+    for (const group of cardGroups) {
+      if (group.children.length > 0) {
+        toolCardOverrides.set(group.card, renderOperation(group));
+      }
+    }
+  }
+  const renderMessages = () =>
+    groups.map((group) =>
+      group.messages.map((item, index) =>
+        renderPreparedGroupMessage(
+          group,
+          index,
+          { ...opts, toolCardOverrides },
+          prepareGroupMessage(group, item, opts),
+        ),
+      ),
+    );
+  const frame = (content: unknown) =>
+    presentation === "continuation"
+      ? content
+      : html`
+          <div
+            class="chat-group tool chat-group--turn-block chat-group--activity chat-group--with-footer"
+            data-chat-row-key=${firstGroup.key}
+          >
+            <div class="chat-group-messages">${content}</div>
+          </div>
+        `;
+  if (soleStep) {
+    // The step is the disclosure: keep the body's bounded scroll and file owner.
+    return frame(html`
+      <div
+        class="chat-activity-group chat-activity-group--step"
+        data-file-session-key=${firstGroup.senderSession?.sessionKey ?? nothing}
+      >
+        <div class="chat-activity-group__body">${renderMessages()}</div>
+        ${renderBrowserTabPreviews(groups, opts)}
+      </div>
+    `);
+  }
   const reviewer = approvalReviews[0]?.label ?? "Review";
   const reviewAriaLabel = reviewOutcome
     ? t(`chat.toolCards.review.${reviewOutcome}`, { reviewer })
@@ -294,34 +343,12 @@ export function renderActivityGroup(
         <span class="chat-tool-row__chevron" aria-hidden="true">${icons.chevronRight}</span>
       </button>
       <div class="chat-activity-group__body" id=${activityBodyId} ?hidden=${!activityExpanded}>
-        ${
-          activityExpanded
-            ? groups.map((group) =>
-                group.messages.map((item, index) =>
-                  renderPreparedGroupMessage(
-                    group,
-                    index,
-                    { ...opts, toolCardOverrides },
-                    prepareGroupMessage(group, item, opts),
-                  ),
-                ),
-              )
-            : nothing
-        }
+        ${activityExpanded ? renderMessages() : nothing}
       </div>
       ${renderBrowserTabPreviews(groups, opts)}
     </div>
   `;
-  return presentation === "continuation"
-    ? content
-    : html`
-        <div
-          class="chat-group tool chat-group--turn-block chat-group--activity chat-group--with-footer"
-          data-chat-row-key=${firstGroup.key}
-        >
-          <div class="chat-group-messages">${content}</div>
-        </div>
-      `;
+  return frame(content);
 }
 
 function isActivityMessageGroup(group: MessageGroup): boolean {

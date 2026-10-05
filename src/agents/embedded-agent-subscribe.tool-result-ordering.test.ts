@@ -158,17 +158,24 @@ describe("tool result ordering", () => {
     }
   });
 
-  it.each(["execution-failed", "incomplete", "overlapping", "reused-active"])(
+  it.each(["execution-failed", "incomplete", "overlapping", "reused-active", "routine-child"])(
     "preserves the %s wrapper outcome",
     async (outcome) => {
       const onAgentEvent = vi.fn<NonNullable<Params["onAgentEvent"]>>();
       const h = harness({ onAgentEvent });
+      // A completed wrapper stays the operation when its only call is routine.
+      const routine = outcome === "routine-child";
       h.start("exec", "outer");
       if (outcome === "overlapping") {
         h.start("exec", "outer");
       }
-      h.start("read", "child", { path: "missing.txt" }, "outer");
-      h.end("read", "child", { content: [{ type: "text", text: "Missing file" }] }, true);
+      if (routine) {
+        h.start("progress_card", "child", { plan: [] }, "outer");
+        h.end("progress_card", "child", { content: [{ type: "text", text: "Updated" }] });
+      } else {
+        h.start("read", "child", { path: "missing.txt" }, "outer");
+        h.end("read", "child", { content: [{ type: "text", text: "Missing file" }] }, true);
+      }
       if (outcome !== "incomplete") {
         h.end("exec", "outer", {
           content: [{ type: "text", text: "Finished" }],
@@ -192,7 +199,9 @@ describe("tool result ordering", () => {
       expect(
         events.findLast((event) => event.stream === "item" && event.data.toolCallId === "child")
           ?.data,
-      ).toMatchObject({ status: "failed" });
+      ).toMatchObject(
+        routine ? { status: "completed", hideFromChannelProgress: true } : { status: "failed" },
+      );
       expect(h.subscription.getItemLifecycle()).toEqual(counters);
     },
   );
