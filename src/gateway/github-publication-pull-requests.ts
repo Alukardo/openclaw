@@ -210,12 +210,12 @@ export async function reconcileGitHubPublicationPullRequest(
     if (!objectId.test(head)) {
       throw new Error("GitHub publication head observation is invalid.");
     }
-    const { raw } = await readGitHubPublicationApi(
+    const { raw: comparisonRaw } = await readGitHubPublicationApi(
       params,
       `repos/${params.pushRepository}/compare/${params.headCommit}...${head}?per_page=1`,
       ["--jq", "{sha: .merge_base_commit.sha}"],
     );
-    const comparison: unknown = JSON.parse(raw);
+    const comparison: unknown = JSON.parse(comparisonRaw);
     if (
       !isRecord(comparison) ||
       typeof comparison.sha !== "string" ||

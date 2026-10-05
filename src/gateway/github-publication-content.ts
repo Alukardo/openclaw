@@ -35,7 +35,7 @@ export async function prepareGitHubPublicationContent(params: {
       credit ? `${title}\n\nWorked on by:\n${credit}` : title,
       [...trailers, `OpenClaw-Publication: ${row.request_id}`],
     )}\n`,
-    assertAction() {
+    assertAction: () => {
       params.assertCurrent();
       if (!prepared.isCurrent()) {
         throw new GitHubPublicationCreditChangedError();
