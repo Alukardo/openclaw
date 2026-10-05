@@ -148,6 +148,8 @@ export type ChatThreadProps = ChatSendStatusActions & {
   startupLabel?: string;
   waitingApproval?: boolean;
   subagentSessions?: readonly GatewaySessionRow[];
+  /** True once `subagentSessions` holds every child, not just rows seeded from another list. */
+  subagentSessionsHydrated?: boolean;
   questionPrompts?: readonly QuestionPrompt[];
   asyncQuestions?: AsyncQuestionPresentation;
   sessions: SessionsListResult | null;
