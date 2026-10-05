@@ -21,6 +21,7 @@ import {
   withOwnedSessionTranscriptWrites,
 } from "../../../config/sessions/transcript-write-context.js";
 import { buildTimestampPrefix } from "../../../gateway/server-methods/agent-timestamp.js";
+import { labelRuntimeContextText } from "../../../llm/types.js";
 import { MAIN_SESSION_RESTART_RECOVERY_SOURCE_TOOL } from "../../../sessions/input-provenance.js";
 import { withEnvAsync } from "../../../test-utils/env.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
@@ -154,7 +155,8 @@ async function withPersistedOrphanBoundary(
 describe("prepareEmbeddedAttemptSessionBoundary", () => {
   it("strips persisted carriers when a session switches to transient replay", async () => {
     const previousUser: AgentMessage = { role: "user", content: "first question", timestamp: 1 };
-    const previousCarrier = buildRuntimeContextCustomMessage("persisted context")!;
+    const previousCarrier: AgentMessage = buildRuntimeContextCustomMessage("persisted context")!;
+    previousCarrier.details = { runtimeContextCarrier: true };
     const reply = makeAssistantMessageFixture({
       content: [{ type: "text", text: "first answer" }],
     });
@@ -230,7 +232,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
         expect(first).toHaveLength(2);
         expect(first[1]).toMatchObject({
           role: "user",
-          content: [{ type: "text", text: carrier.content }],
+          content: labelRuntimeContextText(carrier.content),
         });
         messages.push(
           makeAssistantMessageFixture({
@@ -284,7 +286,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
         }
         expect(next.at(-1)).toMatchObject({
           role: "user",
-          content: [{ type: "text", text: nextCarrier.content }],
+          content: labelRuntimeContextText(nextCarrier.content),
         });
       }),
   );
@@ -311,10 +313,12 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
         appendOnlyRuntimeContext ? [user, carrier] : [carrier, user],
       );
       const message = converted.at(-1);
-      expect(message).toMatchObject({ role: "user", runtimeContextCarrier: true });
-      expect(
-        (message as { runtimeContextCarrierRetained?: boolean }).runtimeContextCarrierRetained,
-      ).toBe(appendOnlyRuntimeContext);
+      expect(message).toMatchObject({
+        role: "user",
+        runtimeContext: { retained: appendOnlyRuntimeContext },
+        runtimeContextCarrier: true,
+        runtimeContextCarrierRetained: appendOnlyRuntimeContext,
+      });
     },
   );
 
@@ -715,13 +719,13 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
         timestamp: 1,
       };
       const { activeSession } = createActiveSession([currentUser]);
-      const branch = vi.fn();
-      const resetLeaf = vi.fn();
+      const branchAsync = vi.fn(async () => undefined);
+      const resetLeafAsync = vi.fn(async () => undefined);
       const clearNextUserMessagePersistenceSuppression = vi.fn();
       const onUserMessagePersistenceInvalidated = vi.fn();
       const sessionManager = createSessionManager({
-        branch,
-        resetLeaf,
+        branchAsync,
+        resetLeafAsync,
         clearNextUserMessagePersistenceSuppression,
         getLeafEntry: () => ({
           id: "current-user",
@@ -757,8 +761,8 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
 
       expect(boundary.orphanRepair).toBeUndefined();
       expect(activeSession.agent.state.messages).toEqual([]);
-      expect(branch).not.toHaveBeenCalled();
-      expect(resetLeaf).not.toHaveBeenCalled();
+      expect(branchAsync).not.toHaveBeenCalled();
+      expect(resetLeafAsync).not.toHaveBeenCalled();
       expect(clearNextUserMessagePersistenceSuppression).not.toHaveBeenCalled();
       expect(onUserMessagePersistenceInvalidated).not.toHaveBeenCalled();
     },
@@ -788,13 +792,13 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
         timestamp: 1,
       };
       const { activeSession } = createActiveSession([]);
-      const branch = vi.fn();
-      const resetLeaf = vi.fn();
+      const branchAsync = vi.fn(async () => undefined);
+      const resetLeafAsync = vi.fn(async () => undefined);
       const clearNextUserMessagePersistenceSuppression = vi.fn();
       const onUserMessagePersistenceInvalidated = vi.fn();
       const sessionManager = createSessionManager({
-        branch,
-        resetLeaf,
+        branchAsync,
+        resetLeafAsync,
         clearNextUserMessagePersistenceSuppression,
         getLeafEntry: () => ({
           id: "current-user",
@@ -828,8 +832,8 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
       });
       expect(boundary.orphanRepair).toBeUndefined();
       expect(activeSession.agent.state.messages).toEqual([]);
-      expect(branch).not.toHaveBeenCalled();
-      expect(resetLeaf).not.toHaveBeenCalled();
+      expect(branchAsync).not.toHaveBeenCalled();
+      expect(resetLeafAsync).not.toHaveBeenCalled();
       expect(clearNextUserMessagePersistenceSuppression).not.toHaveBeenCalled();
       expect(onUserMessagePersistenceInvalidated).not.toHaveBeenCalled();
     },
@@ -847,7 +851,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
       };
       const repairedMessages: AgentMessage[] = [currentUser];
       const { activeSession } = createActiveSession([]);
-      const branch = vi.fn();
+      const branchAsync = vi.fn(async () => undefined);
       const clearNextUserMessagePersistenceSuppression = vi.fn();
       const onUserMessagePersistenceInvalidated = vi.fn();
       const sessionManager = createSessionManager({
@@ -863,7 +867,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
             timestamp: 1,
           },
         }),
-        branch,
+        branchAsync,
         clearNextUserMessagePersistenceSuppression,
         buildSessionContext: () => ({ messages: repairedMessages }),
       });
@@ -893,13 +897,13 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
 
       if (excludeFromContext) {
         expect(boundary.orphanRepair).toBeUndefined();
-        expect(branch).not.toHaveBeenCalled();
+        expect(branchAsync).not.toHaveBeenCalled();
         expect(clearNextUserMessagePersistenceSuppression).not.toHaveBeenCalled();
         expect(onUserMessagePersistenceInvalidated).not.toHaveBeenCalled();
         expect(activeSession.agent.state.messages).toEqual([]);
       } else {
         expect(boundary.orphanRepair?.removeLeaf).toBe(true);
-        expect(branch).toHaveBeenCalledWith("previous-assistant");
+        expect(branchAsync).toHaveBeenCalledWith("previous-assistant");
         expect(clearNextUserMessagePersistenceSuppression).toHaveBeenCalledOnce();
         expect(onUserMessagePersistenceInvalidated).toHaveBeenCalledOnce();
         expect(activeSession.agent.state.messages).toEqual(repairedMessages);
@@ -921,7 +925,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
       },
     ];
     const { activeSession } = createActiveSession([...contextMessages]);
-    const branch = vi.fn();
+    const branchAsync = vi.fn(async () => undefined);
     const clearNextUserMessagePersistenceSuppression = vi.fn();
     const onUserMessagePersistenceInvalidated = vi.fn();
     const sessionManager = createSessionManager({
@@ -932,7 +936,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
         timestamp: "2026-07-13T00:00:00.000Z",
         message: { role: "user", content: "old" },
       }),
-      branch,
+      branchAsync,
       clearNextUserMessagePersistenceSuppression,
       buildSessionContext: () => ({ messages: contextMessages }),
     });
@@ -957,7 +961,7 @@ describe("prepareEmbeddedAttemptSessionBoundary", () => {
     });
 
     expect(boundary.orphanRepair?.removeLeaf).toBe(false);
-    expect(branch).not.toHaveBeenCalled();
+    expect(branchAsync).not.toHaveBeenCalled();
     expect(clearNextUserMessagePersistenceSuppression).not.toHaveBeenCalled();
     expect(onUserMessagePersistenceInvalidated).not.toHaveBeenCalled();
     expect(activeSession.agent.state.messages).toMatchObject([

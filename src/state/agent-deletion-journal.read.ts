@@ -13,7 +13,7 @@ import { runSqliteDeferredTransactionSync } from "../infra/sqlite-transaction.js
 import { normalizeAgentId } from "../routing/session-key.js";
 import { isSessionStoreTopologyChange, sessionChanges } from "../sessions/session-row-changes.js";
 import { hasPreJournalStateSchema } from "./agent-deletion-journal-history.js";
-import { readAgentDeletionRecoveryHolds } from "./agent-deletion-journal-recovery.js";
+import { readAgentDeletionRecoveryHolds } from "./agent-deletion-journal-recovery.kernel.js";
 import type {
   AgentDatabaseDeletionSnapshot,
   AgentDeletionJournalAuthority,
@@ -170,10 +170,14 @@ export function readAgentDatabaseDeletionSnapshotInDatabase(
   statePath: string,
   purpose: AgentDeletionJournalPurpose = "maintenance",
 ): AgentDatabaseDeletionSnapshot {
-  return runSqliteDeferredTransactionSync(database, () => ({
-    retainedDeletions: readRetainedAgentDeletionsFromDatabase(database, statePath, purpose),
-    registeredAgentDatabases: readRegisteredAgentDatabaseRows(database, statePath, false),
-  }));
+  return runSqliteDeferredTransactionSync(
+    database,
+    () => ({
+      retainedDeletions: readRetainedAgentDeletionsFromDatabase(database, statePath, purpose),
+      registeredAgentDatabases: readRegisteredAgentDatabaseRows(database, statePath, false),
+    }),
+    { operationLabel: "agentDeletionJournal.snapshot" },
+  );
 }
 
 export function readAgentDatabaseDeletionSnapshot(

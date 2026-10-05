@@ -23,7 +23,6 @@ import {
   type LocalOverridePackageRoot,
   type LocalPackageOverrideChange,
   type LocalPackageOverridesPlan,
-  type LocalPackageOverridesResult,
 } from "./package-local-overrides-shared.js";
 
 async function copyOverridePayload(params: {
@@ -231,7 +230,6 @@ export async function captureLocalPackageOverrides(params: {
         JSON.stringify({ packageRoot, changes }, null, 2) + "\n",
       );
       return {
-        packageRoot,
         recoveryDir: snapshotDir,
         changes,
         result: {
@@ -329,14 +327,10 @@ export async function captureLocalPackageOverrides(params: {
     }
     const finalRecoveryDir = await ensureRecoveryDir();
 
-    const counts = countChanges(changes);
-    const result: LocalPackageOverridesResult = {
-      status: "none",
-      ...counts,
-      applied: 0,
-      conflicts: [],
+    const result = {
+      ...emptyResult("none"),
+      ...countChanges(changes),
       recoveryDir: finalRecoveryDir,
-      warnings: [],
     };
     await fs.writeFile(
       path.join(finalRecoveryDir, "manifest.json"),
@@ -348,7 +342,6 @@ export async function captureLocalPackageOverrides(params: {
       "utf8",
     );
     return {
-      packageRoot: params.recordedPackageRoot ?? params.packageRoot,
       recoveryDir: finalRecoveryDir,
       changes,
       result,

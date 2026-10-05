@@ -12,8 +12,8 @@ import {
   isSilentReplyStream,
   shouldHideAssistantChatMessage,
 } from "../../lib/chat/message-visibility.ts";
+import { visibleSessionMatches } from "../../lib/sessions/navigation.ts";
 import { isUiGlobalSessionKey, resolveUiDefaultAgentId } from "../../lib/sessions/session-key.ts";
-import { chatScopedEventSessionMatches } from "./chat-history-state.ts";
 import { materializeVisibleAssistantStreamMessages } from "./chat-history-stream.ts";
 import type { ChatEventPayload } from "./chat-history.ts";
 import { reconcileChatRunStartup } from "./chat-run-startup.ts";
@@ -100,25 +100,6 @@ function resolveGatewayErrorText(
   return messageText || "chat error";
 }
 
-function appendCachedChatMessage(
-  state: ChatState,
-  sessionKey: string,
-  message: unknown,
-  eventClaim: object,
-  agentId?: string,
-) {
-  if (!state.chatMessagesBySession) {
-    return;
-  }
-  appendChatMessageToCache(
-    state.chatMessagesBySession,
-    state,
-    { sessionKey, agentId },
-    message,
-    eventClaim,
-  );
-}
-
 export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPayload) {
   if (!incoming) {
     return null;
@@ -138,7 +119,7 @@ export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPay
   const normalizedFinalMessage =
     payload.state === "final" ? normalizeFinalAssistantMessage(payload.message) : null;
   const hadActiveRunBeforeEvent = state.chatRunId !== null;
-  const sessionMatches = chatScopedEventSessionMatches(state, payload.sessionKey, payload.agentId);
+  const sessionMatches = visibleSessionMatches(state, payload.sessionKey, payload.agentId);
   const activeRunMatches =
     state.chatRunId !== null &&
     typeof payload.runId === "string" &&
@@ -153,7 +134,15 @@ export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPay
         const cacheAgentId = isUiGlobalSessionKey(payload.sessionKey)
           ? (payload.agentId ?? resolveUiDefaultAgentId(state))
           : payload.agentId;
-        appendCachedChatMessage(state, payload.sessionKey, finalMessage, payload, cacheAgentId);
+        if (state.chatMessagesBySession) {
+          appendChatMessageToCache(
+            state.chatMessagesBySession,
+            state,
+            { sessionKey: payload.sessionKey, agentId: cacheAgentId },
+            finalMessage,
+            payload,
+          );
+        }
       }
     }
     return null;

@@ -122,8 +122,8 @@ describe("worker turn launcher reclaimed placement", () => {
         state: "active",
         turnClaim: { owner: "worker", runId },
       });
-      const completed = openSessionManager();
-      const leafId = completed.appendMessage(
+      const completed = await openSessionManager();
+      const leafId = await completed.appendMessageAsync(
         makeAgentAssistantMessage({
           content: [{ type: "text", text: "Redispatched worker reply" }],
           timestamp: 51,
@@ -532,11 +532,11 @@ describe("worker turn launcher reclaimed placement", () => {
         sessionKey: SESSION_KEY,
         agentId: "main",
       });
-      placements.fail({
+      await placements.fail({
         sessionId: SESSION_ID,
         recoveryError: "stale terminal worker failure",
       });
-      placements.fail({
+      await placements.fail({
         sessionId: SESSION_ID,
         recoveryError,
       });
