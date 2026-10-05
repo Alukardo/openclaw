@@ -9,7 +9,10 @@ import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.pa
 import { observeMainThreadSql } from "../../test-utils/main-thread-sql-spies.test-support.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { createQueueTestRun } from "./queue.test-helpers.js";
-import type { ReplyBackendMessageInjectionV2 } from "./reply-run-registry.contracts.js";
+import type {
+  ReplyBackendMessageInjectionV2,
+  ReplyBackendQueueMessageOptions,
+} from "./reply-run-registry.contracts.js";
 import { beginReplyMessageInjectionTarget, replyRunRegistry } from "./reply-run-registry.js";
 import { createTestReplyOperation } from "./reply-run-registry.test-helpers.js";
 import { testing } from "./reply-run-registry.test-support.js";
@@ -226,3 +229,30 @@ it.each(["source-only", "with-overlay", "separate-caller", "legacy"] as const)(
     }
   },
 );
+
+it("keeps callback acceptance authoritative over later queue rejection", async () => {
+  const delivery = createDeferred();
+  let queueOptions: ReplyBackendQueueMessageOptions | undefined;
+  const operation = createTestReplyOperation({ originatingLeafEntryId: "leaf-a" });
+  operation.setPhase("running");
+  operation.attachBackend({
+    kind: "embedded",
+    runId: "run-a",
+    cancel: vi.fn(),
+    messageInjection: {
+      isAvailable: () => true,
+      queueMessage: vi.fn((_text, options) => {
+        queueOptions = options;
+        return delivery.promise;
+      }),
+    },
+  });
+  const target = replyRunRegistry.resolveCurrentMessageInjectionTarget(operation.key)!;
+  const attempt = await beginReplyMessageInjectionTarget(target, "uncertain");
+
+  queueOptions?.onQueueAccepted?.(true);
+  delivery.reject(new Error("transcript unconfirmed"));
+
+  await expect(attempt.acceptance).resolves.toBe(true);
+  await expect(attempt.outcome).resolves.toMatchObject({ status: "rejected" });
+});

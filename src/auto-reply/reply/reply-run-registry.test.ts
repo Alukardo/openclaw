@@ -1687,33 +1687,6 @@ describe("reply run registry", () => {
     await expect(rejected.acceptance).resolves.toBe(false);
   });
 
-  it("keeps callback acceptance authoritative over later queue rejection", async () => {
-    const delivery = createDeferred();
-    let queueOptions: ReplyBackendQueueMessageOptions | undefined;
-    const operation = createTestReplyOperation({ originatingLeafEntryId: "leaf-a" });
-    operation.setPhase("running");
-    operation.attachBackend({
-      kind: "embedded",
-      runId: "run-a",
-      cancel: vi.fn(),
-      messageInjection: {
-        isAvailable: () => true,
-        queueMessage: vi.fn((_text, options) => {
-          queueOptions = options;
-          return delivery.promise;
-        }),
-      },
-    });
-    const target = replyRunRegistry.resolveCurrentMessageInjectionTarget(operation.key)!;
-    const attempt = await beginReplyMessageInjectionTarget(target, "uncertain");
-
-    queueOptions?.onQueueAccepted?.(true);
-    delivery.reject(new Error("transcript unconfirmed"));
-
-    await expect(attempt.acceptance).resolves.toBe(true);
-    await expect(attempt.outcome).resolves.toMatchObject({ status: "rejected" });
-  });
-
   it("rejects an ABA successor even when key and leaf are reused", async () => {
     const first = createTestReplyOperation({ originatingLeafEntryId: "leaf-a" });
     first.setPhase("running");
