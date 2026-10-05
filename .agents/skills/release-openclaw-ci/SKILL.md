@@ -84,10 +84,11 @@ Use this with `$release-openclaw-maintainer` and `$openclaw-testing` when a rele
   Avoid broad `gh run view` polling loops; REST quota is easy to burn.
 - Fetch logs only for failed or currently-blocking jobs. If quota is low, stop polling and wait for reset.
 - Treat live-provider flakes separately from code failures: prove key validity, provider HTTP status, retry evidence, and exact failing lane before editing code.
-- A model-list response proves authentication, not billing or inference
-  entitlement. Mandatory live providers must pass a real completion probe
-  before release dispatch. Fix the credential first; do not add an alternate
-  auth path merely to bypass a failed release credential.
+- When diagnosing a live-provider failure, a model-list response proves
+  authentication, not billing or inference entitlement. Confirm the credential
+  with a real completion probe before treating it as valid. Fix the credential
+  first; do not add an alternate auth path merely to bypass a failed release
+  credential.
 - Full Release Validation separates exact-child dispatch, Release Decision,
   and Diagnostic Drain. With `fail_fast=false`, it makes zero child
   cancellation calls; Diagnostic Drain follows every selected child to
